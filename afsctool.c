@@ -12,6 +12,8 @@
 #include <sys/xattr.h>
 #include <hfs/hfs_format.h>
 #include <unistd.h>
+#include <libgen.h>
+#include <signal.h>
 #include <zlib.h>
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -53,6 +55,7 @@ struct folder_info
 	int filetypeslistlen;
 	int filetypeslistsize;
 	bool invert_filetypelist;
+    bool backup_file;
 };
 
 struct filetype_info
@@ -113,7 +116,7 @@ char* getSizeStr(long long int size, long long int size_rounded)
 
 #define xfree(x)    if((x)){free((x)); (x)=NULL;}
 
-void compressFile(const char *inFile, struct stat *inFileInfo, long long int maxSize, int compressionlevel, bool allowLargeBlocks, double minSavings, bool checkFiles)
+void compressFile(const char *inFile, struct stat *inFileInfo, long long int maxSize, int compressionlevel, bool allowLargeBlocks, double minSavings, bool checkFiles, bool backupFile)
 {
 	FILE *in;
 	struct statfs fsInfo;
@@ -125,6 +128,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 	ssize_t xattrnamesize;
 	UInt32 cmpf = 'cmpf';
 	struct timeval times[2];
+    char *backupName = NULL;
 	
 	times[0].tv_sec = inFileInfo->st_atimespec.tv_sec;
 	times[0].tv_usec = inFileInfo->st_atimespec.tv_nsec / 1000;
@@ -203,24 +207,47 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 		free(inBuf);
 		return;
 	}
-	fclose(in);
+	fclose(in); in = NULL;
+    if (backupFile)
+    { int fd;
+      FILE *fp;
+      char *infile;
+        if (!(infile = strdup(inFile))
+            || asprintf(&backupName, "/tmp/afsctool-backup-%s-XXXXXXXXXX", basename(infile)) < 0)
+        {
+            fprintf(stderr, "%s: malloc error, unable to generate temporary backup filename (%s)\n", inFile, strerror(errno));
+            xfree(infile);
+            goto bail;
+        }
+        xfree(infile);
+        if ((fd = mkstemp(backupName)) < 0 || !(fp = fdopen(fd, "w")))
+        {
+            fprintf(stderr, "%s: error creating temporary backup file %s (%s)\n", inFile, backupName, strerror(errno));
+            goto bail;
+        }
+        if (fwrite(inBuf, filesize, 1, fp) != 1)
+        {
+            fprintf(stderr, "%s: Error writing to backup file %s (%lld bytes; %s)\n", inFile, backupName, filesize, strerror(errno));
+            fclose(fp);
+            goto bail;
+        }
+        fclose(fp);
+    }
+
 	outBuf = malloc(filesize + 0x13A + (numBlocks * 9));
 	if (outBuf == NULL)
 	{
 		fprintf(stderr, "%s: malloc error, unable to allocate output buffer of %lld bytes (%s)\n",
                 inFile, filesize + 0x13A + (numBlocks * 9), strerror(errno));
 		utimes(inFile, times);
-		free(inBuf);
-		return;
+		goto bail;
 	}
 	outdecmpfsBuf = malloc(3802);
 	if (outdecmpfsBuf == NULL)
 	{
 		fprintf(stderr, "%s: malloc error, unable to allocate xattr buffer (3802 bytes; %s)\n", inFile, strerror(errno));
 		utimes(inFile, times);
-		free(inBuf);
-		free(outBuf);
-		return;
+		goto bail;
 	}
 	{ uLong compLen = compressBound(compblksize);
         outBufBlock = malloc(compLen);
@@ -229,10 +256,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
             fprintf(stderr, "%s: malloc error, unable to allocate compression buffer of %lu bytes (%s)\n",
                     inFile, compLen, strerror(errno));
             utimes(inFile, times);
-            free(inBuf);
-            free(outBuf);
-            free(outdecmpfsBuf);
-            return;
+            goto bail;
         }
     }
 	*(UInt32 *) outdecmpfsBuf = EndianU32_NtoL(cmpf);
@@ -251,22 +275,14 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 		if (compress2(outBufBlock, &cmpedsize, inBuf + inBufPos, ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos, compressionlevel) != Z_OK)
 		{
 			utimes(inFile, times);
-			free(inBuf);
-			free(outBuf);
-			free(outdecmpfsBuf);
-			free(outBufBlock);
-			return;
+			goto bail;
 		}
 		if (cmpedsize > (((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos))
 		{
 			if (!allowLargeBlocks && (((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos) == compblksize)
             {
                 utimes(inFile, times);
-                free(inBuf);
-                free(outBuf);
-                free(outdecmpfsBuf);
-                free(outBufBlock);
-				return;
+                goto bail;
             }
 			*(unsigned char *) outBufBlock = 0xFF;
 			memcpy(outBufBlock + 1, inBuf + inBufPos, ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos);
@@ -293,11 +309,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 			currBlock - outBuf + outdecmpfsSize + 50 >= filesize)
 		{
 			utimes(inFile, times);
-			free(inBuf);
-			free(outBuf);
-			free(outdecmpfsBuf);
- 			xfree(outBufBlock);
-			return;
+			goto bail;
 		}
 		*(UInt32 *) (outBuf + 4) = EndianU32_NtoB(currBlock - outBuf);
 		*(UInt32 *) (outBuf + 8) = EndianU32_NtoB(currBlock - outBuf - 0x100);
@@ -313,29 +325,25 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 		if (setxattr(inFile, "com.apple.ResourceFork", outBuf, currBlock - outBuf + 50, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 		{
 			fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
-			free(inBuf);
-			free(outBuf);
-			free(outdecmpfsBuf);
- 			xfree(outBufBlock);
-			return;
+			goto bail;
 		}
 	}
 	if (setxattr(inFile, "com.apple.decmpfs", outdecmpfsBuf, outdecmpfsSize, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 	{
 		fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
-		free(inBuf);
-		free(outBuf);
-		free(outdecmpfsBuf);
-		xfree(outBufBlock);
-		return;
+		goto bail;
 	}
-	in = fopen(inFile, "w");
+
+    signal(SIGINT, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
+
+    in = fopen(inFile, "w");
 	if (in == NULL)
 	{
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-		return;
+		goto bail;
 	}
-	fclose(in);
+	fclose(in); in = NULL;
 	if (chflags(inFile, UF_COMPRESSED | inFileInfo->st_flags) < 0)
 	{
 		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
@@ -351,25 +359,27 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 		in = fopen(inFile, "w");
 		if (in == NULL)
 		{
-			free(inBuf);
-			free(outBuf);
-			free(outdecmpfsBuf);
-			xfree(outBufBlock);
 			fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-			return;
+            if (backupName)
+            {
+                fprintf(stderr, "\ta backup is available as %s\n", backupName);
+                xfree(backupName);
+            }
+			goto bail;
 		}
 		if (fwrite(inBuf, filesize, 1, in) != 1)
 		{
-			free(inBuf);
-			free(outBuf);
-			free(outdecmpfsBuf);
-			xfree(outBufBlock);
 			fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
-			return;
+            if (backupName)
+            {
+                fprintf(stderr, "\ta backup is available as %s\n", backupName);
+                xfree(backupName);
+            }
+			goto bail;
 		}
-		fclose(in);
+		fclose(in); in = NULL;
 		utimes(inFile, times);
-		return;
+		goto bail;
 	}
 	if (checkFiles)
 	{
@@ -378,7 +388,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 		if (in == NULL)
 		{
 			fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-			return;
+			goto bail;
 		}
 		if (inFileInfo->st_size != filesize || 
 			fread(outBuf, filesize, 1, in) != 1 ||
@@ -386,14 +396,15 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 		{
 			fclose(in);
 			printf("%s: Compressed file check failed, reverting file changes\n", inFile);
+            if (backupName)
+            {
+                fprintf(stderr, "\tin case of further failures, a backup will be available as %s\n", backupName);
+            }
 			if (chflags(inFile, (~UF_COMPRESSED) & inFileInfo->st_flags) < 0)
 			{
-				free(inBuf);
-				free(outBuf);
-				free(outdecmpfsBuf);
-				xfree(outBufBlock);
 				fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
-				return;
+                xfree(backupName);
+				goto bail;
 			}
 			if (removexattr(inFile, "com.apple.decmpfs", XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 			{
@@ -407,29 +418,39 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 			in = fopen(inFile, "w");
 			if (in == NULL)
 			{
-				free(inBuf);
-				free(outBuf);
-				free(outdecmpfsBuf);
-				xfree(outBufBlock);
 				fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-				return;
+                xfree(backupName);
+				goto bail;
 			}
 			if (fwrite(inBuf, filesize, 1, in) != 1)
 			{
-				free(inBuf);
-				free(outBuf);
-				free(outdecmpfsBuf);
-				xfree(outBufBlock);
 				fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
-				return;
+                xfree(backupName);
+				goto bail;
 			}
 		}
 		fclose(in);
+        in = NULL;
 	}
-	utimes(inFile, times);
-	free(inBuf);
-	free(outBuf);
-	free(outdecmpfsBuf);
+    utimes(inFile, times);
+bail:
+    if (in)
+    {
+        fclose(in);
+    }
+    if (backupName)
+    {
+        // a backupName is set and hasn't been unset because of a processing failure:
+        // remove the file now.
+        unlink(backupName);
+        free(backupName);
+        backupName = NULL;
+    }
+    signal(SIGINT, SIG_DFL);
+    signal(SIGHUP, SIG_DFL);
+	xfree(inBuf);
+	xfree(outBuf);
+	xfree(outdecmpfsBuf);
 	xfree(outBufBlock);
 }
 
@@ -1528,7 +1549,8 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 					if (folderinfo->compress_files && S_ISREG(currfile->fts_statp->st_mode))
 					{
 						if (folderinfo->filetypeslist == NULL || filetype_found)
-							compressFile(currfile->fts_path, currfile->fts_statp, folderinfo->maxSize, folderinfo->compressionlevel, folderinfo->allowLargeBlocks, folderinfo->minSavings, folderinfo->check_files);
+							compressFile(currfile->fts_path, currfile->fts_statp, folderinfo->maxSize, folderinfo->compressionlevel,
+                                     folderinfo->allowLargeBlocks, folderinfo->minSavings, folderinfo->check_files, folderinfo->backup_file);
 						lstat(currfile->fts_path, currfile->fts_statp);
 						if (((currfile->fts_statp->st_flags & UF_COMPRESSED) == 0) && folderinfo->print_files)
 						{
@@ -1572,7 +1594,7 @@ void printUsage()
 		   "Decompress HFS+ compressed file or folder:                afsctool -d[i] [-t <ContentType>] file[s]/folder[s]\n"
 		   "Create archive file with compressed data in data fork:    afsctool -a[d] src dst [... srcN dstN]\n"
 		   "Extract HFS+ compression archive to file:                 afsctool -x[d] src dst [... srcN dstN]\n"
-		   "Apply HFS+ compression to file or folder:                 afsctool -c[nlfvvi] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
+		   "Apply HFS+ compression to file or folder:                 afsctool -c[nlfvvib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
 		   "Options:\n"
 		   "-v Increase verbosity level\n"
 		   "-f Detect hard links\n"
@@ -1584,6 +1606,7 @@ void printUsage()
 		   "-t <ContentType/Extension> Return statistics for files of given content type and when compressing,\n"
 		   "                           if this option is given then only files of content type(s) or extension(s) specified with this option will be compressed\n"
 		   "-i Compress or show statistics for files that don't have content type(s) or extension(s) given by -t <ContentType/Extension> instead of those that do\n"
+           "-b make a backup of files before compressing them\n"
 		   "-<level> Compression level to use when compressing (ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n");
 }
 
@@ -1599,7 +1622,9 @@ int main (int argc, const char * argv[])
 	int printVerbose = 0, compressionlevel = 5;
 	double minSavings = 0.0;
 	long long int foldersize, foldersize_rounded, filesize, filesize_rounded, maxSize = 0;
-	bool printDir = FALSE, decomp = FALSE, createfile = FALSE, extractfile = FALSE, applycomp = FALSE, fileCheck = TRUE, argIsFile, hardLinkCheck = FALSE, dstIsFile, free_src = FALSE, free_dst = FALSE, invert_filetypelist = FALSE, allowLargeBlocks = FALSE, filetype_found;
+	bool printDir = FALSE, decomp = FALSE, createfile = FALSE, extractfile = FALSE, applycomp = FALSE,
+        fileCheck = TRUE, argIsFile, hardLinkCheck = FALSE, dstIsFile, free_src = FALSE, free_dst = FALSE,
+        invert_filetypelist = FALSE, allowLargeBlocks = FALSE, filetype_found, backupFile = FALSE;
 	FILE *afscFile, *outFile;
 	char *xattrnames, *curr_attr, header[4];
 	ssize_t xattrnamesize, xattrsize, getxattrret, xattrPos;
@@ -1768,6 +1793,14 @@ int main (int argc, const char * argv[])
 					}
 					invert_filetypelist = TRUE;
 					break;
+                case 'b':
+                    if (!applycomp)
+                    {
+                        printUsage();
+                        exit(EINVAL);
+                    }
+                    folderinfo.backup_file = backupFile = TRUE;
+                    break;
 				default:
 					printUsage();
 					exit(EINVAL);
@@ -1781,6 +1814,10 @@ int main (int argc, const char * argv[])
 		printUsage();
 		exit(EINVAL);
 	}
+
+	signal(SIGXCPU, SIG_IGN);
+    signal(SIGXFSZ, SIG_IGN);
+
 	int N, step, n;
     if (createfile || extractfile)
     {
@@ -1856,7 +1893,7 @@ int main (int argc, const char * argv[])
         
         if (applycomp && argIsFile)
         {
-            compressFile(fullpath, &fileinfo, maxSize, compressionlevel, allowLargeBlocks, minSavings, fileCheck);
+            compressFile(fullpath, &fileinfo, maxSize, compressionlevel, allowLargeBlocks, minSavings, fileCheck, backupFile);
             lstat(fullpath, &fileinfo);
         }
         

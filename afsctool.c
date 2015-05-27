@@ -111,12 +111,14 @@ char* getSizeStr(long long int size, long long int size_rounded)
 	return sizeStr;
 }
 
+#define xfree(x)    if((x)){free((x)); (x)=NULL;}
+
 void compressFile(const char *inFile, struct stat *inFileInfo, long long int maxSize, int compressionlevel, bool allowLargeBlocks, double minSavings, bool checkFiles)
 {
 	FILE *in;
 	struct statfs fsInfo;
 	unsigned int compblksize = 0x10000, numBlocks, outdecmpfsSize = 0;
-	void *inBuf, *outBuf, *outBufBlock, *outdecmpfsBuf, *currBlock, *blockStart;
+	void *inBuf = NULL, *outBuf = NULL, *outBufBlock = NULL, *outdecmpfsBuf = NULL, *currBlock = NULL, *blockStart = NULL;
 	long long int inBufPos, filesize = inFileInfo->st_size;
 	unsigned long int cmpedsize;
 	char *xattrnames, *curr_attr;
@@ -156,7 +158,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 		xattrnames = (char *) malloc(xattrnamesize);
 		if (xattrnames == NULL)
 		{
-			fprintf(stderr, "%s: malloc error, unable to get file information\n", inFile);
+			fprintf(stderr, "%s: malloc error, unable to get file information (%lu bytes; %s)\n",
+                    inFile, (unsigned long) xattrnamesize, strerror(errno));
 			return;
 		}
 		if ((xattrnamesize = listxattr(inFile, xattrnames, xattrnamesize, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW)) <= 0)
@@ -187,14 +190,14 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 	inBuf = malloc(filesize);
 	if (inBuf == NULL)
 	{
-		fprintf(stderr, "%s: malloc error, unable to allocate input buffer\n", inFile);
+		fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, filesize, strerror(errno));
 		fclose(in);
 		utimes(inFile, times);
 		return;
 	}
 	if (fread(inBuf, filesize, 1, in) != 1)
 	{
-		fprintf(stderr, "%s: Error reading file\n", inFile);
+		fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));
 		fclose(in);
 		utimes(inFile, times);
 		free(inBuf);
@@ -204,7 +207,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 	outBuf = malloc(filesize + 0x13A + (numBlocks * 9));
 	if (outBuf == NULL)
 	{
-		fprintf(stderr, "%s: malloc error, unable to allocate output buffer\n", inFile);
+		fprintf(stderr, "%s: malloc error, unable to allocate output buffer of %lld bytes (%s)\n",
+                inFile, filesize + 0x13A + (numBlocks * 9), strerror(errno));
 		utimes(inFile, times);
 		free(inBuf);
 		return;
@@ -212,22 +216,25 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 	outdecmpfsBuf = malloc(3802);
 	if (outdecmpfsBuf == NULL)
 	{
-		fprintf(stderr, "%s: malloc error, unable to allocate xattr buffer\n", inFile);
+		fprintf(stderr, "%s: malloc error, unable to allocate xattr buffer (3802 bytes; %s)\n", inFile, strerror(errno));
 		utimes(inFile, times);
 		free(inBuf);
 		free(outBuf);
 		return;
 	}
-	outBufBlock = malloc(compressBound(compblksize));
-	if (outBufBlock == NULL)
-	{
-		fprintf(stderr, "%s: malloc error, unable to allocate compression buffer\n", inFile);
-		utimes(inFile, times);
-		free(inBuf);
-		free(outBuf);
-		free(outdecmpfsBuf);
-		return;
-	}
+	{ uLong compLen = compressBound(compblksize);
+        outBufBlock = malloc(compLen);
+        if (outBufBlock == NULL)
+        {
+            fprintf(stderr, "%s: malloc error, unable to allocate compression buffer of %lu bytes (%s)\n",
+                    inFile, compLen, strerror(errno));
+            utimes(inFile, times);
+            free(inBuf);
+            free(outBuf);
+            free(outdecmpfsBuf);
+            return;
+        }
+    }
 	*(UInt32 *) outdecmpfsBuf = EndianU32_NtoL(cmpf);
 	*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(4);
 	*(UInt64 *) (outdecmpfsBuf + 8) = EndianU64_NtoL(filesize);
@@ -277,6 +284,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 		*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x4) = EndianU32_NtoL(currBlock - blockStart);
 		*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x8) = EndianU32_NtoL(cmpedsize);
 	}
+	// outBufBlock isn't needed anymore: deallocate here.
+	free(outBufBlock); outBufBlock = NULL;
 	
 	if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == 4)
 	{
@@ -287,7 +296,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 			free(inBuf);
 			free(outBuf);
 			free(outdecmpfsBuf);
-			free(outBufBlock);
+ 			xfree(outBufBlock);
 			return;
 		}
 		*(UInt32 *) (outBuf + 4) = EndianU32_NtoB(currBlock - outBuf);
@@ -307,7 +316,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 			free(inBuf);
 			free(outBuf);
 			free(outdecmpfsBuf);
-			free(outBufBlock);
+ 			xfree(outBufBlock);
 			return;
 		}
 	}
@@ -317,7 +326,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 		free(inBuf);
 		free(outBuf);
 		free(outdecmpfsBuf);
-		free(outBufBlock);
+		xfree(outBufBlock);
 		return;
 	}
 	in = fopen(inFile, "w");
@@ -345,7 +354,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 			free(inBuf);
 			free(outBuf);
 			free(outdecmpfsBuf);
-			free(outBufBlock);
+			xfree(outBufBlock);
 			fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 			return;
 		}
@@ -354,8 +363,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 			free(inBuf);
 			free(outBuf);
 			free(outdecmpfsBuf);
-			free(outBufBlock);
-			fprintf(stderr, "%s: Error writing to file\n", inFile);
+			xfree(outBufBlock);
+			fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
 			return;
 		}
 		fclose(in);
@@ -382,7 +391,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 				free(inBuf);
 				free(outBuf);
 				free(outdecmpfsBuf);
-				free(outBufBlock);
+				xfree(outBufBlock);
 				fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
 				return;
 			}
@@ -401,7 +410,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 				free(inBuf);
 				free(outBuf);
 				free(outdecmpfsBuf);
-				free(outBufBlock);
+				xfree(outBufBlock);
 				fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 				return;
 			}
@@ -410,8 +419,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 				free(inBuf);
 				free(outBuf);
 				free(outdecmpfsBuf);
-				free(outBufBlock);
-				fprintf(stderr, "%s: Error writing to file\n", inFile);
+				xfree(outBufBlock);
+				fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
 				return;
 			}
 		}
@@ -421,7 +430,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, long long int max
 	free(inBuf);
 	free(outBuf);
 	free(outdecmpfsBuf);
-	free(outBufBlock);
+	xfree(outBufBlock);
 }
 
 void decompressFile(const char *inFile, struct stat *inFileInfo)
@@ -567,7 +576,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo)
 	outBuf = malloc(filesize);
 	if (outBuf == NULL)
 	{
-		fprintf(stderr, "%s: malloc error, unable to allocate output buffer\n", inFile);
+		fprintf(stderr, "%s: malloc error, unable to allocate output buffer (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
 		if (inBuf != NULL)
 			free(inBuf);
 		if (indecmpfsBuf != NULL)
@@ -825,6 +834,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo)
 	
 	if (fwrite(outBuf, filesize, 1, in) != 1)
 	{
+        fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, strerror(errno));
 		fclose(in);
 		if (chflags(inFile, UF_COMPRESSED | inFileInfo->st_flags) < 0)
 		{
@@ -836,7 +846,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo)
 			free(indecmpfsBuf);
 		free(outBuf);
 		utimes(inFile, times);
-		fprintf(stderr, "%s: Error writing to file\n", inFile);
 		return;
 	}
 	

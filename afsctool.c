@@ -1644,10 +1644,8 @@ int afsctool (int argc, const char * argv[])
 	void *attr_buf;
 	UInt16 big16;
 	UInt64 big64;
-#ifdef SUPPORT_PARALLEL
 	int nJobs = 0;
-#endif
-	
+
 	folderinfo.filetypeslist = NULL;
 	folderinfo.filetypeslistlen = 0;
 	folderinfo.filetypeslistsize = 0;
@@ -1925,7 +1923,7 @@ next_arg:;
 		if (lstat(fullpath, &fileinfo) < 0)
 		{
 			fprintf(stderr, "%s: %s\n", fullpath, strerror(errno));
-			return -1;
+			continue;
 		}
 		
 		argIsFile = ((fileinfo.st_mode & S_IFDIR) == 0);
@@ -1940,7 +1938,7 @@ next_arg:;
 		{
 			dstIsFile = ((dstfileinfo.st_mode & S_IFDIR) == 0);
 			fprintf(stderr, "%s: %s already exists at this path\n", fullpath, dstIsFile ? "File" : "Folder");
-			return -1;
+			continue;
 		}
 		
 		if (applycomp && argIsFile)
@@ -1980,7 +1978,7 @@ next_arg:;
 			if (afscFile == NULL)
 			{
 				fprintf(stderr, "%s: %s\n", fullpathdst, strerror(errno));
-				return -1;
+				continue;
 			}
 			else
 			{
@@ -2068,7 +2066,7 @@ next_arg:;
 			if (afscFile == NULL)
 			{
 				fprintf(stderr, "%s: %s\n", fullpathdst, strerror(errno));
-				return -1;
+				continue;
 			}
 			else
 			{
@@ -2089,7 +2087,7 @@ next_arg:;
 				if (outFile == NULL)
 				{
 					fprintf(stderr, "%s: %s\n", fullpathdst, strerror(errno));
-					return -1;
+					continue;
 				}
 				else
 				{
@@ -2152,7 +2150,7 @@ next_arg:;
 						if (lstat(fullpathdst, &dstfileinfo) < 0)
 						{
 							fprintf(stderr, "%s: %s\n", fullpathdst, strerror(errno));
-							return -1;
+							continue;
 						}
 						decompressFile(fullpathdst, &dstfileinfo);
 					}
@@ -2168,7 +2166,8 @@ next_arg:;
 			if ((currfolder = fts_open(folderarray, FTS_PHYSICAL, NULL)) == NULL)
 			{
 				fprintf(stderr, "%s: %s\n", fullpath, strerror(errno));
-				exit(EACCES);
+// 				exit(EACCES);
+				continue;
 			}
 			while ((currfile = fts_read(currfolder)) != NULL)
 			{
@@ -2233,7 +2232,8 @@ next_arg:;
 			if ((currfolder = fts_open(folderarray, FTS_PHYSICAL, NULL)) == NULL)
 			{
 				fprintf(stderr, "%s: %s\n", fullpath, strerror(errno));
-				exit(EACCES);
+// 				exit(EACCES);
+				continue;
 			}
 			folderinfo.uncompressed_size = 0;
 			folderinfo.uncompressed_size_rounded = 0;
@@ -2247,7 +2247,7 @@ next_arg:;
 			folderinfo.num_folders = 0;
 			folderinfo.num_hard_link_folders = 0;
 			folderinfo.print_info = printVerbose;
-			folderinfo.print_files = printDir;
+			folderinfo.print_files = (nJobs == 0)? printDir : 0;
 			folderinfo.compress_files = applycomp;
 			folderinfo.check_files = fileCheck;
 			folderinfo.allowLargeBlocks = allowLargeBlocks;
@@ -2264,7 +2264,14 @@ next_arg:;
 			if (printVerbose > 0 || !printDir)
 			{
 				if (printDir) printf("\n");
-				printf("%s:\n", fullpath);
+				if (!nJobs)
+				{
+					printf("%s:\n", fullpath);
+				}
+				else
+				{
+					printf("Adding %s to queue\n", fullpath);
+				}
 				if (folderinfo.filetypes != NULL)
 				{
 					alltypesinfo.filetype = NULL;

@@ -1,0 +1,33 @@
+This is my version of brkirch's afsctool
+
+AFSC (Apple File System Compression) tool is an utility that can be used
+to apply HFS+ compression to file(s), decompress HFS+ compressed file(s), or
+get information about existing HFS+ compressed file(s).
+Mac OS 10.6 or later is required.
+(https://brkirch.wordpress.com/afsctool/)
+
+I have made several modifications, mostly concerning the compression feature:
+- improved error reporting
+- an attempt to reduce memory pressure compressing large files
+- support for multiple files/folders specified on the commandline
+- a backup option while compressing (that comes in addition to the existing undo if
+  something went wrong)
+
+The main new feature that justifies the version bump, however, is the parallel
+processing feature, allowing the user to specify an arbitray (though positive :))
+number of threads that will compress the specified files in parallel.
+This feature has two modes that each perform best in specific conditions:
+- perform only the actual compression in parallel. Disk IO (reading the file into
+  memory, writing it back to disk) is done with exclusive access to prevent disk
+  trashing. This mode is selected with the -j option.
+- perform all file compression steps in parallel. This mode is suitable for solid-
+  state disks, file collections that reside on different disks or collections with
+  files of different sizes (including notably very large files). This mode is
+  selected with the -J option.
+The performance difference is never enormous in my testing, but YMMV.
+
+Interestingly, the optimum performance (on large collections) is not necessarily
+obtained with as many worker threads as there are CPU cores. Collections with
+a significant number of very large files and many more smaller files can apparently
+be processed faster when using a rather larger number of workers, with a gain
+approaching the number of cores.

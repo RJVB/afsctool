@@ -1,0 +1,34 @@
+[Buildset]
+BuildItems=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x00)
+
+[CMake]
+Build Directory Count=1
+Current Build Directory Index=0
+ProjectRootRelative=./
+
+[CMake][CMake Build Directory 0]
+Build Directory Path=file:///Volumes/Debian/MP9/var/macports/build/_Volumes_Debian_MP9_site-ports_sysutils_afsctool/afsctool/work/build
+Build Type=Release
+CMake Binary=file:///Volumes/Debian/MP9/bin/cmake
+Environment Profile=
+Extra Arguments=
+Install Directory=file:///opt/local
+
+[CustomDefinesAndIncludes][ProjectPath0]
+Defines=\x00\x00\x00\x00
+Includes=\x00\x00\x00\x00
+Path=.
+
+[Defines And Includes][Compiler]
+Name=Clang
+Path=clang
+Type=Clang
+
+[MakeBuilder]
+Additional Options=--nice 10 -w VERBOSE=1 V=1
+Default Make Environment Profile=KDE/MacPorts
+Make Binary=wmake
+Number Of Jobs=1
+
+[Project]
+VersionControlSupport=kdevgit

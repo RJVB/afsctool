@@ -1587,7 +1587,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 
 void printUsage()
 {
-	printf("afsctool 1.6.4 (build 34)\n"
+	printf("afsctool 1.6.5 (build 1)\n"
 		   "Report if file is HFS+ compressed:                        afsctool [-v] file[s]\n"
 		   "Report if folder contains HFS+ compressed files:          afsctool [-fvvi] [-t <ContentType/Extension>] folder[s]\n"
 		   "List HFS+ compressed files in folder:                     afsctool -l[fvv] folder\n"

@@ -32,6 +32,7 @@ public:
     {
         listLock = new CRITSECTLOCK(4000);
         threadLock = new CRITSECTLOCK(4000);
+        quitRequestedFlag = false;
     }
     virtual ~ParallelProcessor()
     {
@@ -68,9 +69,19 @@ public:
         }
         return ret;
     }
+    bool quitRequested()
+    {
+        return quitRequestedFlag;
+    }
+    bool setQuitRequested(bool val)
+    { bool ret = quitRequestedFlag;
+        quitRequestedFlag = val;
+        return ret;
+    }
 protected:
     ItemQueue itemList;
     CRITSECTLOCK *listLock, *threadLock;
+    bool quitRequestedFlag;
 };
 
 typedef struct folder_info FolderInfo;

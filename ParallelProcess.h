@@ -31,6 +31,7 @@ bool lockParallelProcessorIO(FileProcessor *worker);
 // unlock the ioLock if it was previously locked by a call to lockParallelProcessorIO()
 bool unLockParallelProcessorIO(FileProcessor *worker);
 int runParallelProcessor(ParallelFileProcessor *p);
+void stopParallelProcessor(ParallelFileProcessor *p);
 
 #ifdef __cplusplus
 }

@@ -21,8 +21,8 @@
 #include "afsctool.h"
 #ifdef SUPPORT_PARALLEL
 #	include "ParallelProcess.h"
-	 static ParallelFileProcessor *PP = NULL;
-	 static bool exclusive_io = true;
+	static ParallelFileProcessor *PP = NULL;
+	static bool exclusive_io = true;
 #endif
 
 const char *sizeunit10_short[] = {"KB", "MB", "GB", "TB", "PB", "EB"};
@@ -73,6 +73,16 @@ char* getSizeStr(long long int size, long long int size_rounded)
 
 #define xfree(x)	if((x)){free((x)); (x)=NULL;}
 
+static bool quitRequested = FALSE;
+
+static void signal_handler(int sig)
+{
+	fprintf( stderr, "Received signal %d: afsctool will quit\n", sig );
+#ifdef SUPPORT_PARALLEL
+	stopParallelProcessor(PP);
+#endif
+}
+
 #if SUPPORT_PARALLEL
 void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker )
 #else
@@ -97,6 +107,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	UInt32 cmpf = 'cmpf';
 	struct timeval times[2];
 	char *backupName = NULL;
+
+	if (quitRequested)
+	{
+		return;
+	}
 
 	times[0].tv_sec = inFileInfo->st_atimespec.tv_sec;
 	times[0].tv_usec = inFileInfo->st_atimespec.tv_nsec / 1000;
@@ -316,13 +331,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		goto bail;
 	}
 
-	signal(SIGINT, SIG_IGN);
-	signal(SIGHUP, SIG_IGN);
-
 #ifdef SUPPORT_PARALLEL
 	if( exclusive_io && worker ){
 		locked = lockParallelProcessorIO(worker);
 	}
+#else
+    signal(SIGINT, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
 #endif
 	in = fopen(inFile, "w");
 	if (in == NULL)
@@ -438,8 +453,10 @@ bail:
 		free(backupName);
 		backupName = NULL;
 	}
+#ifndef SUPPORT_PARALLEL
 	signal(SIGINT, SIG_DFL);
-signal(SIGHUP, SIG_DFL);
+    signal(SIGHUP, SIG_DFL);
+#endif
 	xfree(inBuf);
 	xfree(outBuf);
 	xfree(outdecmpfsBuf);
@@ -458,6 +475,11 @@ void decompressFile(const char *inFile, struct stat *inFileInfo)
 	ssize_t xattrnamesize, indecmpfsLen = 0, inRFLen = 0, getxattrret, RFpos = 0;
 	struct timeval times[2];
 	
+	if (quitRequested)
+	{
+		return;
+	}
+
 	times[0].tv_sec = inFileInfo->st_atimespec.tv_sec;
 	times[0].tv_usec = inFileInfo->st_atimespec.tv_nsec / 1000;
 	times[1].tv_sec = inFileInfo->st_mtimespec.tv_sec;
@@ -1273,6 +1295,11 @@ void process_file(const char *filepath, const char *filetype, struct stat *filei
 	struct filetype_info *filetypeinfo = NULL;
 	bool filetype_found = FALSE;
 	
+	if (quitRequested)
+	{
+		return;
+	}
+
 	xattrnamesize = listxattr(filepath, NULL, 0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
 	
 	if (xattrnamesize > 0)
@@ -1447,8 +1474,9 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 	
 	do
 	{
-		if ((volume_search || strncasecmp("/Volumes/", currfile->fts_path, 9) != 0 || strlen(currfile->fts_path) < 9) &&
-			(strncasecmp("/dev/", currfile->fts_path, 5) != 0 || strlen(currfile->fts_path) < 5))
+		if (!quitRequested
+			&& (volume_search || strncasecmp("/Volumes/", currfile->fts_path, 9) != 0 || strlen(currfile->fts_path) < 9)
+			&& (strncasecmp("/dev/", currfile->fts_path, 5) != 0 || strlen(currfile->fts_path) < 5))
 		{
 			if (S_ISDIR(currfile->fts_statp->st_mode) && currfile->fts_ino != 2)
 			{
@@ -1580,7 +1608,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 		}
 		else
 			fts_set(currfolder, currfile, FTS_SKIP);
-	} while ((currfile = fts_read(currfolder)) != NULL);
+	} while (!quitRequested && (currfile = fts_read(currfolder)) != NULL);
 	checkForHardLink(NULL, NULL, NULL);
 	fts_close(currfolder);
 }
@@ -1865,6 +1893,7 @@ next_arg:;
     }
 #endif
 
+    // ignore signals due to exceeding CPU or file size limits
 	signal(SIGXCPU, SIG_IGN);
 	signal(SIGXFSZ, SIG_IGN);
 
@@ -2439,11 +2468,14 @@ next_arg:;
 		free(folderinfo.filetypeslist);
 	
 #ifdef SUPPORT_PARALLEL
-    if (PP)
-    {
-        fprintf( stderr, "Processed %d entries\n", runParallelProcessor(PP) );
-        releaseParallelProcessor(PP);
-    }
+	if (PP)
+	{
+		signal(SIGINT, signal_handler);
+		signal(SIGHUP, signal_handler);
+		fprintf( stderr, "Starting %d worker threads to process queue\n", nJobs );
+		fprintf( stderr, "Processed %d entries\n", runParallelProcessor(PP) );
+		releaseParallelProcessor(PP);
+	}
 #endif
 	return 0;
 }

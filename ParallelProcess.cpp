@@ -133,14 +133,21 @@ int ParallelFileProcessor::run()
     }
     if( allDoneEvent ){
       DWORD waitResult = ~WAIT_OBJECT_0;
-        while( nJobs >= 1 && size() > 0 && waitResult != WAIT_OBJECT_0 ){
+        while( nJobs >= 1 && !quitRequested() && size() > 0 && waitResult != WAIT_OBJECT_0 ){
             waitResult = WaitForSingleObject( allDoneEvent, 2000 );
             if( nJobs ){
               double perc = 100.0 * nProcessed / N;
                   if( perc >= prevPerc + 10 ){
                       fprintf( stderr, "%s %d%%", (prevPerc > 0)? " .." : "", int(perc + 0.5) );
+                      fflush(stderr);
                       prevPerc = perc;
                   }
+            }
+            if( quitRequested() && !threadPool.empty() ){
+                // the WaitForSingleObject() call above was interrupted by the signal that
+                // led to quitRequested() being set and as a result the workers haven't yet
+                // had the chance to exit cleanly. Give them that chance now.
+                waitResult = WaitForSingleObject( allDoneEvent, 2000 );
             }
         }
         fputc( '\n', stderr );
@@ -185,9 +192,9 @@ DWORD FileProcessor::Run(LPVOID arg)
     if( PP ){
       FileEntry entry;
         nProcessed = 0;
-        while( PP->getFront(entry) ){
+        while( !PP->quitRequested() && PP->getFront(entry) ){
+          // create a scoped lock without closing it immediately
           CRITSECTLOCK::Scope scp(PP->ioLock, 0);
-//             scp.verbose = true;
             scope = &scp;
             entry.compress(this);
             _InterlockedIncrement(&PP->nProcessed);
@@ -268,8 +275,15 @@ bool unLockParallelProcessorIO(FileProcessor *worker)
 
 int runParallelProcessor(ParallelFileProcessor *p)
 { int ret = -1;
-    if(p){
+    if( p ){
         ret = p->run();
     }
     return ret;
+}
+
+void stopParallelProcessor(ParallelFileProcessor *p)
+{
+    if( p ){
+        p->setQuitRequested(true);
+    }
 }

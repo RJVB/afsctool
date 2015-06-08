@@ -1640,8 +1640,8 @@ void printUsage()
 		   "-i Compress or show statistics for files that don't have content type(s) or extension(s) given by -t <ContentType/Extension> instead of those that do\n"
            "-b make a backup of files before compressing them\n"
 #ifdef SUPPORT_PARALLEL
-           "-jN compress files using <N> threads (disk IO is exclusive)\n"
-           "-JN read, compress and write files using <N> threads; for when disk IO can be concurrent\n"
+           "-jN compress files using <N> threads (compression is concurrent, disk IO is exclusive)\n"
+           "-JN read, compress and write files using <N> threads (everything including disk IO is concurrent)\n"
 #endif
 		   "-<level> Compression level to use when compressing (ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n");
 }

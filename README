@@ -12,6 +12,10 @@ I have made several modifications, mostly concerning the compression feature:
 - support for multiple files/folders specified on the commandline
 - a backup option while compressing (that comes in addition to the existing undo if
   something went wrong)
+- support for files that are read-only (and/or write-only) by changing their permissions
+  temporarily. No error checking is done for this feature; failure will lead to
+  errors that are already caught.
+
 
 The main new feature that justifies the version bump, however, is the parallel
 processing feature, allowing the user to specify an arbitray (though positive :))

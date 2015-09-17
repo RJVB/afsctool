@@ -2,7 +2,7 @@
 BuildItems=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x00)
 
 [CMake]
-Build Directory Count=1
+Build Directory Count=2
 Current Build Directory Index=0
 ProjectRootRelative=./
 
@@ -14,6 +14,14 @@ Environment Profile=
 Extra Arguments=
 Install Directory=file:///opt/local
 
+[CMake][CMake Build Directory 1]
+Build Directory Path=file:///Volumes/Debian/Users/bertin/work/src/MacOSX/afsctool_34/build
+Build Type=Debug
+CMake Binary=file:///Volumes/Debian/MP9/bin/cmake
+Environment Profile=
+Extra Arguments=-Wno-dev
+Install Directory=file:///opt/local
+
 [CustomDefinesAndIncludes][ProjectPath0]
 Defines=\x00\x00\x00\x00
 Includes=\x00\x00\x00\x00
@@ -23,6 +31,134 @@ Path=.
 Name=Clang
 Path=clang
 Type=Clang
+
+[Filters]
+size=25
+
+[Filters][0]
+inclusive=0
+pattern=.*
+targets=3
+
+[Filters][1]
+inclusive=0
+pattern=.git
+targets=2
+
+[Filters][10]
+inclusive=0
+pattern=*.o
+targets=1
+
+[Filters][11]
+inclusive=0
+pattern=*.a
+targets=1
+
+[Filters][12]
+inclusive=0
+pattern=*.so
+targets=1
+
+[Filters][13]
+inclusive=0
+pattern=*.so.*
+targets=1
+
+[Filters][14]
+inclusive=0
+pattern=moc_*.cpp
+targets=1
+
+[Filters][15]
+inclusive=0
+pattern=*.moc
+targets=1
+
+[Filters][16]
+inclusive=0
+pattern=ui_*.h
+targets=1
+
+[Filters][17]
+inclusive=0
+pattern=qrc_*.cpp
+targets=1
+
+[Filters][18]
+inclusive=0
+pattern=*~
+targets=1
+
+[Filters][19]
+inclusive=0
+pattern=*.orig
+targets=1
+
+[Filters][2]
+inclusive=0
+pattern=CVS
+targets=2
+
+[Filters][20]
+inclusive=0
+pattern=.*.kate-swp
+targets=1
+
+[Filters][21]
+inclusive=0
+pattern=.*.swp
+targets=1
+
+[Filters][22]
+inclusive=0
+pattern=*.pyc
+targets=1
+
+[Filters][23]
+inclusive=0
+pattern=*.pyo
+targets=1
+
+[Filters][24]
+inclusive=0
+pattern=afsctool-mp9-work
+targets=3
+
+[Filters][3]
+inclusive=0
+pattern=.svn
+targets=2
+
+[Filters][4]
+inclusive=0
+pattern=_svn
+targets=2
+
+[Filters][5]
+inclusive=0
+pattern=SCCS
+targets=2
+
+[Filters][6]
+inclusive=0
+pattern=_darcs
+targets=2
+
+[Filters][7]
+inclusive=0
+pattern=.hg
+targets=2
+
+[Filters][8]
+inclusive=0
+pattern=.bzr
+targets=2
+
+[Filters][9]
+inclusive=0
+pattern=__pycache__
+targets=2
 
 [MakeBuilder]
 Additional Options=--nice 10 -w VERBOSE=1 V=1

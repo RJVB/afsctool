@@ -255,6 +255,16 @@ bool addFileToParallelProcessor(ParallelFileProcessor *p, const char *inFile, co
     }
 }
 
+size_t filesInParallelProcessor(ParallelFileProcessor *p)
+{
+	if( p ){
+		return p->itemCount();
+	}
+	else{
+		return 0;
+	}
+}
+
 // attempt to lock the ioLock; returns a success value
 bool lockParallelProcessorIO(FileProcessor *worker)
 { bool locked = false;

@@ -52,6 +52,11 @@ public:
         return itemList;
     }
 
+    size_t itemCount()
+    {
+        return itemList.size();
+    }
+
     // return the number of elements in the itemList in a thread-safe fashion
     // but with a timed wait if the underlying implementation allows it.
     size_type size()

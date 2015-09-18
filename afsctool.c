@@ -83,6 +83,14 @@ static void signal_handler(int sig)
 #endif
 }
 
+bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
+{
+	struct statfs fsInfo;
+	return (statfs(inFile, &fsInfo) >= 0 && fsInfo.f_type == 17
+	    && S_ISREG(inFileInfo->st_mode)
+	    && (inFileInfo->st_flags & UF_COMPRESSED) == 0);
+}
+
 #if SUPPORT_PARALLEL
 void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker )
 #else
@@ -97,7 +105,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	bool backupFile = folderinfo->backup_file;
 
 	FILE *in;
-	struct statfs fsInfo;
 	unsigned int compblksize = 0x10000, numBlocks, outdecmpfsSize = 0;
 	void *inBuf = NULL, *outBuf = NULL, *outBufBlock = NULL, *outdecmpfsBuf = NULL, *currBlock = NULL, *blockStart = NULL;
 	long long int inBufPos, filesize = inFileInfo->st_size;
@@ -118,14 +125,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	times[1].tv_sec = inFileInfo->st_mtimespec.tv_sec;
 	times[1].tv_usec = inFileInfo->st_mtimespec.tv_nsec / 1000;
 	
-	if (statfs(inFile, &fsInfo) < 0)
-		return;
-	if (fsInfo.f_type != 17)
-		return;
-	
-	if (!S_ISREG(inFileInfo->st_mode))
-		return;
-	if ((inFileInfo->st_flags & UF_COMPRESSED) != 0)
+	if (!fileIsCompressable(inFile, inFileInfo))
 		return;
 	if (filesize > maxSize && maxSize != 0)
 		return;
@@ -1505,7 +1505,8 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 #ifdef SUPPORT_PARALLEL
                             if (PP)
                             {
-                                addFileToParallelProcessor( PP, currfile->fts_path, currfile->fts_statp, folderinfo, false );
+								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp))
+									addFileToParallelProcessor( PP, currfile->fts_path, currfile->fts_statp, folderinfo, false );
                             }
                             else
 #endif
@@ -1547,7 +1548,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 
 void printUsage()
 {
-	printf("afsctool 1.6.6 (build 1)\n"
+	printf("afsctool 1.6.7 (build 1)\n"
 		   "Report if file is HFS+ compressed:                        afsctool [-v] file[s]\n"
 		   "Report if folder contains HFS+ compressed files:          afsctool [-fvvi] [-t <ContentType/Extension>] folder[s]\n"
 		   "List HFS+ compressed files in folder:                     afsctool -l[fvv] folder\n"
@@ -1914,7 +1915,8 @@ next_arg:;
 #ifdef SUPPORT_PARALLEL
             if (PP)
             {
-                addFileToParallelProcessor( PP, fullpath, &fileinfo, &fi, true );
+				if (fileIsCompressable(fullpath, &fileinfo))
+					addFileToParallelProcessor( PP, fullpath, &fileinfo, &fi, true );
             }
             else
 #endif
@@ -2402,10 +2404,15 @@ next_arg:;
 #ifdef SUPPORT_PARALLEL
 	if (PP)
 	{
-		signal(SIGINT, signal_handler);
-		signal(SIGHUP, signal_handler);
-		fprintf( stderr, "Starting %d worker threads to process queue\n", nJobs );
-		fprintf( stderr, "Processed %d entries\n", runParallelProcessor(PP) );
+		if (filesInParallelProcessor(PP))
+		{
+			signal(SIGINT, signal_handler);
+			signal(SIGHUP, signal_handler);
+			fprintf( stderr, "Starting %d worker threads to process queue with %lu items\n", nJobs, filesInParallelProcessor(PP) );
+			fprintf( stderr, "Processed %d entries\n", runParallelProcessor(PP) );
+		}
+		else
+			fprintf( stderr, "No compressable files found.\n");
 		releaseParallelProcessor(PP);
 	}
 #endif

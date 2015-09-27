@@ -91,6 +91,7 @@ protected:
 
 typedef struct folder_info FolderInfo;
 class FileProcessor;
+class ParallelFileProcessor;
 
 typedef struct FileEntry {
 public:
@@ -98,16 +99,14 @@ public:
     struct stat fileInfo;
     FolderInfo *folderInfo;
     bool freeFolderInfo;
+    long long compressedSize;
     FileEntry();
     FileEntry( const char *name, const struct stat *finfo, FolderInfo *dinfo, const bool ownInfo=false );
     FileEntry( const char *name, const struct stat *finfo, FolderInfo &dinfo );
     FileEntry(const FileEntry &ref);
     ~FileEntry();
     FileEntry &operator = (const FileEntry &ref);
-    void compress(FileProcessor *worker)
-    {
-        compressFile( fileName.c_str(), &fileInfo, folderInfo, worker );
-    }
+    void compress(FileProcessor *worker, ParallelFileProcessor *PP);
 } FileEntry;
 
 class ParallelFileProcessor : public ParallelProcessor<FileEntry>
@@ -132,6 +131,8 @@ public:
     // empty the queue. After spawning the workers, run() waits
     // on allDoneEvent before exiting.
     int run();
+
+    FolderInfo jobInfo;
 protected:
     int workerDone(FileProcessor *worker);
     // the number of configured or active worker threads
@@ -146,6 +147,7 @@ protected:
     bool ioLockedFlag;
     DWORD ioLockingThread;
 friend class FileProcessor;
+friend class FileEntry;
 };
 
 class FileProcessor : public Thread
@@ -157,6 +159,8 @@ public:
         , Thread()
         , procID(procID)
         , scope(NULL)
+		, runningTotalCompressed(0)
+		, runningTotalRaw(0)
     {}
     bool lockScope();
     bool unLockScope();
@@ -174,6 +178,7 @@ protected:
 
     ParallelFileProcessor *PP;
     volatile long nProcessed;
+    volatile long long runningTotalRaw, runningTotalCompressed;
     const int procID;
     CRITSECTLOCK::Scope *scope;
     friend class ParallelFileProcessor;

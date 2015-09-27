@@ -1217,19 +1217,19 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 	}
 }
 
-void process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo)
+long long process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo)
 {
 	char *xattrnames, *curr_attr;
 	const char *fileextension = NULL;
 	ssize_t xattrnamesize, xattrssize = 0, xattrsize, RFsize = 0, compattrsize = 0;
-	long long int filesize, filesize_rounded;
+	long long int filesize, filesize_rounded, ret;
 	int numxattrs = 0, numhiddenattr = 0, i;
 	struct filetype_info *filetypeinfo = NULL;
 	bool filetype_found = FALSE;
 	
 	if (quitRequested)
 	{
-		return;
+		return 0;
 	}
 
 	xattrnamesize = listxattr(filepath, NULL, 0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
@@ -1240,13 +1240,13 @@ void process_file(const char *filepath, const char *filetype, struct stat *filei
 		if (xattrnames == NULL)
 		{
 			fprintf(stderr, "malloc error, unable to get file information\n");
-			return;
+			return 0;
 		}
 		if ((xattrnamesize = listxattr(filepath, xattrnames, xattrnamesize, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW)) <= 0)
 		{
 			fprintf(stderr, "listxattr: %s\n", strerror(errno));
 			free(xattrnames);
-			return;
+			return 0;
 		}
 		for (curr_attr = xattrnames; curr_attr < xattrnames + xattrnamesize; curr_attr += strlen(curr_attr) + 1)
 		{
@@ -1255,7 +1255,7 @@ void process_file(const char *filepath, const char *filetype, struct stat *filei
 			{
 				fprintf(stderr, "getxattr: %s\n", strerror(errno));
 				free(xattrnames);
-				return;
+				return 0;
 			}
 			numxattrs++;
 			if (strcmp(curr_attr, "com.apple.ResourceFork") == 0 && strlen(curr_attr) == 22)
@@ -1295,7 +1295,7 @@ void process_file(const char *filepath, const char *filetype, struct stat *filei
 	
 	if ((fileinfo->st_flags & UF_COMPRESSED) == 0)
 	{
-		filesize_rounded = filesize = fileinfo->st_size;
+		ret = filesize_rounded = filesize = fileinfo->st_size;
 		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
 		filesize += RFsize;
 		filesize_rounded += RFsize;
@@ -1363,7 +1363,7 @@ void process_file(const char *filepath, const char *filetype, struct stat *filei
 			filetypeinfo->uncompressed_size += filesize;
 			filetypeinfo->uncompressed_size_rounded += filesize_rounded;
 		}
-		filesize_rounded = filesize = RFsize;
+		ret = filesize_rounded = filesize = RFsize;
 		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
 		folderinfo->compressed_size += filesize;
 		folderinfo->compressed_size_rounded += filesize_rounded;
@@ -1385,6 +1385,38 @@ void process_file(const char *filepath, const char *filetype, struct stat *filei
 			filetypeinfo->num_compressed++;
 		}
 	}
+	return ret;
+}
+
+void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
+{
+	long long foldersize, foldersize_rounded;
+
+	printf("Total number of files: %lld\n", folderinfo->num_files);
+	if (hardLinkCheck)
+		printf("Total number of file hard links: %lld\n", folderinfo->num_hard_link_files);
+	printf("Total number of folders: %lld\n", folderinfo->num_folders);
+	if (hardLinkCheck)
+		printf("Total number of folder hard links: %lld\n", folderinfo->num_hard_link_folders);
+	printf("Total number of items (number of files + number of folders): %lld\n", folderinfo->num_files + folderinfo->num_folders);
+	foldersize = folderinfo->uncompressed_size;
+	foldersize_rounded = folderinfo->uncompressed_size_rounded;
+	if ((folderinfo->num_hard_link_files == 0 && folderinfo->num_hard_link_folders == 0) || !hardLinkCheck)
+		printf("Folder size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n", getSizeStr(foldersize, foldersize_rounded));
+	else
+		printf("Folder size (uncompressed): %s\n", getSizeStr(foldersize, foldersize_rounded));
+	foldersize = folderinfo->compressed_size;
+	foldersize_rounded = folderinfo->compressed_size_rounded;
+	if ((folderinfo->num_hard_link_files == 0 && folderinfo->num_hard_link_folders == 0) || !hardLinkCheck)
+		printf("Folder size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n", getSizeStr(foldersize, foldersize_rounded));
+	else
+		printf("Folder size (compressed - decmpfs xattr): %s\n", getSizeStr(foldersize, foldersize_rounded));
+	foldersize = folderinfo->compressed_size + folderinfo->compattr_size;
+	foldersize_rounded = folderinfo->compressed_size_rounded + folderinfo->compattr_size;
+	printf("Folder size (compressed): %s\n", getSizeStr(foldersize, foldersize_rounded));
+	printf("Compression savings: %0.1f%%\n", (1.0 - ((float) (folderinfo->compressed_size + folderinfo->compattr_size) / folderinfo->uncompressed_size)) * 100.0);
+	foldersize = folderinfo->total_size;
+	printf("Approximate total folder size (files + file overhead + folder overhead): %s\n", getSizeStr(foldersize, foldersize));
 }
 
 void process_folder(FTS *currfolder, struct folder_info *folderinfo)
@@ -1507,6 +1539,8 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
                             {
 								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp))
 									addFileToParallelProcessor( PP, currfile->fts_path, currfile->fts_statp, folderinfo, false );
+								else
+									process_file(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
                             }
                             else
 #endif
@@ -1548,7 +1582,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 
 void printUsage()
 {
-	printf("afsctool 1.6.7 (build 1)\n"
+	printf("afsctool 1.6.8 (build 1)\n"
 		   "Report if file is HFS+ compressed:                        afsctool [-v] file[s]\n"
 		   "Report if folder contains HFS+ compressed files:          afsctool [-fvvi] [-t <ContentType/Extension>] folder[s]\n"
 		   "List HFS+ compressed files in folder:                     afsctool -l[fvv] folder\n"
@@ -1815,14 +1849,14 @@ next_arg:;
     if (nJobs > 0)
     {
         PP = createParallelProcessor(nJobs);
-		if (PP)
-		{
-			if (printVerbose)
-			{
-				printf( "Verbose mode switched off in parallel processing mode\n");
-			}
-			printVerbose = false;
-		}
+// 		if (PP)
+// 		{
+// 			if (printVerbose)
+// 			{
+// 				printf( "Verbose mode switched off in parallel processing mode\n");
+// 			}
+// 			printVerbose = false;
+// 		}
     }
 #endif
 
@@ -1843,7 +1877,7 @@ next_arg:;
 	}
 	for ( n = 0 ; i < N ; i += step, ++n )
 	{
-		if (n && printVerbose > 0)
+		if (n && printVerbose > 0 && !nJobs)
 		{
 			printf("\n");
 		}
@@ -1916,7 +1950,13 @@ next_arg:;
             if (PP)
             {
 				if (fileIsCompressable(fullpath, &fileinfo))
+				{
 					addFileToParallelProcessor( PP, fullpath, &fileinfo, &fi, true );
+				}
+				else
+				{
+					process_file(fullpath, NULL, &fileinfo, getParallelProcessorJobInfo(PP));
+				}
             }
             else
 #endif
@@ -2209,7 +2249,7 @@ next_arg:;
 			folderinfo.num_hard_link_files = 0;
 			folderinfo.num_folders = 0;
 			folderinfo.num_hard_link_folders = 0;
-			folderinfo.print_info = printVerbose;
+			folderinfo.print_info = (nJobs)? false : printVerbose;
 			folderinfo.print_files = (nJobs == 0)? printDir : 0;
 			folderinfo.compress_files = applycomp;
 			folderinfo.check_files = fileCheck;
@@ -2226,9 +2266,9 @@ next_arg:;
 			folderinfo.num_folders--;
 			if (printVerbose > 0 || !printDir)
 			{
-				if (printDir) printf("\n");
 				if (!nJobs)
 				{
+					if (printDir) printf("\n");
 					printf("%s:\n", fullpath);
 				}
 				else
@@ -2278,7 +2318,7 @@ next_arg:;
 						}
 						if (!folderinfo.invert_filetypelist)
 							printf("Number of HFS+ compressed files: %lld\n", folderinfo.filetypes[i].num_compressed);
-						if (printVerbose > 0 && (!folderinfo.invert_filetypelist))
+						if (printVerbose > 0 && nJobs == 0 && (!folderinfo.invert_filetypelist))
 						{
 							printf("Total number of files: %lld\n", folderinfo.filetypes[i].num_files);
 							if (hardLinkCheck)
@@ -2320,7 +2360,7 @@ next_arg:;
 					{
 						printf("\nTotals of file content types\n");
 						printf("Number of HFS+ compressed files: %lld\n", alltypesinfo.num_compressed);
-						if (printVerbose > 0)
+						if (printVerbose > 0 && nJobs == 0)
 						{
 							printf("Total number of files: %lld\n", alltypesinfo.num_files);
 							if (hardLinkCheck)
@@ -2355,34 +2395,10 @@ next_arg:;
 						printf("No compressable files in folder\n");
 					else
 						printf("Number of HFS+ compressed files: %lld\n", folderinfo.num_compressed);
-				}
-				if (printVerbose > 0)
-				{
-					printf("Total number of files: %lld\n", folderinfo.num_files);
-					if (hardLinkCheck)
-						printf("Total number of file hard links: %lld\n", folderinfo.num_hard_link_files);
-					printf("Total number of folders: %lld\n", folderinfo.num_folders);
-					if (hardLinkCheck)
-						printf("Total number of folder hard links: %lld\n", folderinfo.num_hard_link_folders);
-					printf("Total number of items (number of files + number of folders): %lld\n", folderinfo.num_files + folderinfo.num_folders);
-					foldersize = folderinfo.uncompressed_size;
-					foldersize_rounded = folderinfo.uncompressed_size_rounded;
-					if ((folderinfo.num_hard_link_files == 0 && folderinfo.num_hard_link_folders == 0) || !hardLinkCheck)
-						printf("Folder size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n", getSizeStr(foldersize, foldersize_rounded));
-					else
-						printf("Folder size (uncompressed): %s\n", getSizeStr(foldersize, foldersize_rounded));
-					foldersize = folderinfo.compressed_size;
-					foldersize_rounded = folderinfo.compressed_size_rounded;
-					if ((folderinfo.num_hard_link_files == 0 && folderinfo.num_hard_link_folders == 0) || !hardLinkCheck)
-						printf("Folder size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n", getSizeStr(foldersize, foldersize_rounded));
-					else
-						printf("Folder size (compressed - decmpfs xattr): %s\n", getSizeStr(foldersize, foldersize_rounded));
-					foldersize = folderinfo.compressed_size + folderinfo.compattr_size;
-					foldersize_rounded = folderinfo.compressed_size_rounded + folderinfo.compattr_size;
-					printf("Folder size (compressed): %s\n", getSizeStr(foldersize, foldersize_rounded));
-					printf("Compression savings: %0.1f%%\n", (1.0 - ((float) (folderinfo.compressed_size + folderinfo.compattr_size) / folderinfo.uncompressed_size)) * 100.0);
-					foldersize = folderinfo.total_size;
-					printf("Approximate total folder size (files + file overhead + folder overhead): %s\n", getSizeStr(foldersize, foldersize));
+					if (printVerbose > 0)
+					{
+						printFolderInfo( &folderinfo, hardLinkCheck );
+					}
 				}
 			}
 		}
@@ -2409,10 +2425,19 @@ next_arg:;
 			signal(SIGINT, signal_handler);
 			signal(SIGHUP, signal_handler);
 			fprintf( stderr, "Starting %d worker threads to process queue with %lu items\n", nJobs, filesInParallelProcessor(PP) );
-			fprintf( stderr, "Processed %d entries\n", runParallelProcessor(PP) );
+			int processed = runParallelProcessor(PP);
+			fprintf( stderr, "Processed %d entries\n", processed );
+			if (printVerbose > 0)
+			{
+				struct folder_info *fInfo = getParallelProcessorJobInfo(PP);
+				if (fInfo->num_files > 0)
+				{
+					printFolderInfo( getParallelProcessorJobInfo(PP), hardLinkCheck );
+				}
+			}
 		}
 		else
-			fprintf( stderr, "No compressable files found.\n");
+			fprintf( stderr, "No compressable files found.\n" );
 		releaseParallelProcessor(PP);
 	}
 #endif

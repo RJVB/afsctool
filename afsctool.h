@@ -108,6 +108,7 @@ extern void compressFile(const char *inFile, struct stat *inFileInfo, struct fol
 #else
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo);
 #endif
+extern long long process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo);
 extern int afsctool (int argc, const char * argv[]);
 
 #ifdef __cplusplus

@@ -556,6 +556,17 @@ static inline long _InterlockedIncrement( volatile long *atomic )
 /*
  Emulates the Microsoft-specific intrinsic of the same name.
  @n
+ Increments the value at the address pointed to by atomic with value val in locked fashion,
+ i.e. preempting any other access to the same memory location
+ */
+static inline long _InterlockedAdd64( volatile long long *atomic, long long val )
+{
+     return __sync_add_and_fetch(atomic, val);
+}
+
+/*
+ Emulates the Microsoft-specific intrinsic of the same name.
+ @n
  Decrements the value at the address pointed to by atomic with 1 in locked fashion,
  i.e. preempting any other access to the same memory location
  */

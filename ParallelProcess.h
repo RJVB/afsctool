@@ -33,6 +33,7 @@ bool lockParallelProcessorIO(FileProcessor *worker);
 bool unLockParallelProcessorIO(FileProcessor *worker);
 int runParallelProcessor(ParallelFileProcessor *p);
 void stopParallelProcessor(ParallelFileProcessor *p);
+struct folder_info *getParallelProcessorJobInfo(ParallelFileProcessor *p);
 
 #ifdef __cplusplus
 }

@@ -64,6 +64,12 @@ FileEntry &FileEntry::operator =(const FileEntry &ref)
     return *this;
 }
 
+void FileEntry::compress(FileProcessor *worker, ParallelFileProcessor *PP)
+{
+    compressFile( fileName.c_str(), &fileInfo, folderInfo, worker );
+    compressedSize = (PP)? process_file( fileName.c_str(), NULL, &fileInfo, &PP->jobInfo ) : 0;
+}
+
 // ================================= ParallelFileProcessor methods =================================
 
 ParallelFileProcessor::ParallelFileProcessor(const int n)
@@ -75,6 +81,7 @@ ParallelFileProcessor::ParallelFileProcessor(const int n)
     ioLock = new CRITSECTLOCK(4000);
     ioLockedFlag = false;
     ioLockingThread = 0;
+    memset( &jobInfo, 0, sizeof(jobInfo) );
 }
 
 ParallelFileProcessor *createParallelProcessor(const int n)
@@ -162,7 +169,10 @@ int ParallelFileProcessor::run()
             thread->Stop(true);
         }
         if( thread->nProcessed ){
-            fprintf( stderr, "Worker thread #%d processed %ld files\n", i, thread->nProcessed );
+            fprintf( stderr, "Worker thread #%d processed %ld files, %lld bytes compressed to %lld bytes (%g%%)\n",
+					 i, thread->nProcessed,
+					 thread->runningTotalRaw, thread->runningTotalCompressed,
+					 100.0 * double(thread->runningTotalRaw - thread->runningTotalCompressed) / double(thread->runningTotalRaw) );
         }
         delete thread;
         threadPool.pop_front();
@@ -196,8 +206,10 @@ DWORD FileProcessor::Run(LPVOID arg)
           // create a scoped lock without closing it immediately
           CRITSECTLOCK::Scope scp(PP->ioLock, 0);
             scope = &scp;
-            entry.compress(this);
+            entry.compress( this, PP );
             _InterlockedIncrement(&PP->nProcessed);
+            runningTotalRaw += entry.fileInfo.st_size;
+            runningTotalCompressed += (entry.compressedSize > 0)? entry.compressedSize : entry.fileInfo.st_size;
             nProcessed += 1;
             scope = NULL;
         }
@@ -296,4 +308,9 @@ void stopParallelProcessor(ParallelFileProcessor *p)
     if( p ){
         p->setQuitRequested(true);
     }
+}
+
+struct folder_info *getParallelProcessorJobInfo(ParallelFileProcessor *p)
+{
+	return (p)? &p->jobInfo : NULL;
 }

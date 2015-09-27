@@ -86,7 +86,13 @@ static void signal_handler(int sig)
 bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
 {
 	struct statfs fsInfo;
-	return (statfs(inFile, &fsInfo) >= 0 && fsInfo.f_type == 17
+	int ret = statfs(inFile, &fsInfo);
+// 	fprintf( stderr, "statfs=%d f_type=%u ISREG=%d UF_COMPRESSED=%d compressable=%d\n",
+// 			 ret, fsInfo.f_type, S_ISREG(inFileInfo->st_mode), (inFileInfo->st_flags & UF_COMPRESSED),
+// 			 ret >= 0 && fsInfo.f_type == 17
+// 				&& S_ISREG(inFileInfo->st_mode)
+// 				&& (inFileInfo->st_flags & UF_COMPRESSED) == 0 );
+	return (ret >= 0 && fsInfo.f_type == 17
 	    && S_ISREG(inFileInfo->st_mode)
 	    && (inFileInfo->st_flags & UF_COMPRESSED) == 0);
 }
@@ -125,12 +131,23 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	times[1].tv_sec = inFileInfo->st_mtimespec.tv_sec;
 	times[1].tv_usec = inFileInfo->st_mtimespec.tv_nsec / 1000;
 	
-	if (!fileIsCompressable(inFile, inFileInfo))
+	if (!fileIsCompressable(inFile, inFileInfo)){
 		return;
-	if (filesize > maxSize && maxSize != 0)
+	}
+	if (filesize > maxSize && maxSize != 0){
+		if (folderinfo->print_info > 2)
+		{
+			fprintf( stderr, "Skipping file %s size %lld > max size %lld\n", inFile, filesize, maxSize );
+		}
 		return;
-	if (filesize == 0)
+	}
+	if (filesize == 0){
+		if (folderinfo->print_info > 2)
+		{
+			fprintf( stderr, "Skipping empty file %s\n", inFile );
+		}
 		return;
+	}
 	orig_mode = inFileInfo->st_mode;
 	if ((orig_mode & S_IWUSR) == 0) {
 		chmod(inFile, orig_mode | S_IWUSR);
@@ -174,8 +191,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 
 	numBlocks = (filesize + compblksize - 1) / compblksize;
-	if ((filesize + 0x13A + (numBlocks * 9)) > 2147483647)
+	if ((filesize + 0x13A + (numBlocks * 9)) > 2147483647) {
+// 		if (folderinfo->print_info > 2)
+// 		{
+			fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
+// 		}
 		return;
+	}
 
 #ifdef SUPPORT_PARALLEL
 	bool locked = false;
@@ -1848,7 +1870,7 @@ next_arg:;
 #ifdef SUPPORT_PARALLEL
     if (nJobs > 0)
     {
-        PP = createParallelProcessor(nJobs);
+        PP = createParallelProcessor(nJobs, printVerbose);
 // 		if (PP)
 // 		{
 // 			if (printVerbose)

@@ -60,13 +60,20 @@ public:
     // return the number of elements in the itemList in a thread-safe fashion
     // but with a timed wait if the underlying implementation allows it.
     size_type size()
-    { CRITSECTLOCK::Scope scope(listLock, 2500);
+    {
+        if( listLock->IsLocked() ){
+            listLock->lockCounter += 1;
+        }
+        CRITSECTLOCK::Scope scope(listLock, 2500);
         return itemList.size();
     }
 
     bool getFront(T &value)
-    { CRITSECTLOCK::Scope scope(listLock);
-      bool ret = false;
+    { bool ret = false;
+        if( listLock->IsLocked() ){
+            listLock->lockCounter += 1;
+        }
+        CRITSECTLOCK::Scope scope(listLock);
         if( !itemList.empty() ){
             value = itemList.front();
             itemList.pop();
@@ -83,9 +90,14 @@ public:
         quitRequestedFlag = val;
         return ret;
     }
+    inline unsigned long listLockConflicts() const
+    {
+        return listLock->lockCounter;
+    }
 protected:
     ItemQueue itemList;
-    CRITSECTLOCK *listLock, *threadLock;
+    CRITSECTLOCK *listLock;
+    CRITSECTLOCK *threadLock;
     bool quitRequestedFlag;
 };
 
@@ -114,9 +126,12 @@ class ParallelFileProcessor : public ParallelProcessor<FileEntry>
     typedef std::deque<FileProcessor*> PoolType;
 
 public:
-    ParallelFileProcessor(const int n=1);
+    ParallelFileProcessor(const int n=1, const int verboseLevel=0);
     virtual ~ParallelFileProcessor()
     {
+        if( verboseLevel > 1 ){
+            fprintf( stderr, "Queue lock conflicts: %lu\n", listLockConflicts() );
+        }
         delete ioLock;
         if( allDoneEvent ){
             CloseHandle(allDoneEvent);
@@ -133,6 +148,11 @@ public:
     int run();
 
     FolderInfo jobInfo;
+
+    inline int verbose() const
+    {
+        return verboseLevel;
+    }
 protected:
     int workerDone(FileProcessor *worker);
     // the number of configured or active worker threads
@@ -146,6 +166,7 @@ protected:
     CRITSECTLOCK *ioLock;
     bool ioLockedFlag;
     DWORD ioLockingThread;
+    int verboseLevel;
 friend class FileProcessor;
 friend class FileEntry;
 };
@@ -161,9 +182,15 @@ public:
         , scope(NULL)
 		, runningTotalCompressed(0)
 		, runningTotalRaw(0)
+        , cpuUsage(0.0)
     {}
     bool lockScope();
     bool unLockScope();
+
+	inline const int processorID() const
+	{
+		return procID;
+	}
 
 protected:
     DWORD Run(LPVOID arg);
@@ -179,6 +206,7 @@ protected:
     ParallelFileProcessor *PP;
     volatile long nProcessed;
     volatile long long runningTotalRaw, runningTotalCompressed;
+    volatile double cpuUsage;
     const int procID;
     CRITSECTLOCK::Scope *scope;
     friend class ParallelFileProcessor;

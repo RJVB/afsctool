@@ -21,7 +21,7 @@ typedef struct FileProcessor FileProcessor;
 extern "C" {
 #endif //__cplusplus
 
-ParallelFileProcessor *createParallelProcessor(const int n);
+ParallelFileProcessor *createParallelProcessor(const int n, const int verboseLevel);
 void releaseParallelProcessor(ParallelFileProcessor *p);
 bool addFileToParallelProcessor(ParallelFileProcessor *p, const char *inFile,
                                 const struct stat *inFileInfo, struct folder_info *folderinfo,

@@ -3,3 +3,4 @@ xcode
 build
 *.log
 .*-swp
+testdir

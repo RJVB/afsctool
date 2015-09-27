@@ -379,6 +379,7 @@ class MutexEx {
 	}
 
 public:
+	volatile unsigned long lockCounter;
 #ifdef CRITSECTEX_ALLOWSHARED
 	void *operator new(size_t size)
 	{ extern void *MSEreallocShared( void* ptr, size_t N, size_t oldN );

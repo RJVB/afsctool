@@ -51,7 +51,7 @@ char* getSizeStr(long long int size, long long int size_rounded)
 			sprintf(sizeStr, "%s%.12g %s (%s) / ", sizeStr, (double) (((long long int) ((double) size_rounded / sizeunit10[unit10] * 100) + 5) / 10) / 10, sizeunit10_short[unit10], sizeunit10_long[unit10]);
 			break;
 		default:
-			sprintf(sizeStr, "%s%0.12g %s (%s) / ", sizeStr,  (double) (((long long int) ((double) size_rounded / sizeunit10[unit10] * 1000) + 5) / 10) / 100, sizeunit10_short[unit10], sizeunit10_long[unit10]);
+			sprintf(sizeStr, "%s%0.12g %s (%s) / ", sizeStr,   (double) (((long long int) ((double) size_rounded / sizeunit10[unit10] * 1000) + 5) / 10) / 100, sizeunit10_short[unit10], sizeunit10_long[unit10]);
 			break;
 	}
 	
@@ -64,7 +64,7 @@ char* getSizeStr(long long int size, long long int size_rounded)
 			sprintf(sizeStr, "%s%.12g %s (%s)", sizeStr, (double) (((long long int) ((double) size_rounded / sizeunit2[unit2] * 100) + 5) / 10) / 10, sizeunit2_short[unit2], sizeunit2_long[unit2]);
 			break;
 		default:
-			sprintf(sizeStr, "%s%0.12g %s (%s)", sizeStr,  (double) (((long long int) ((double) size_rounded / sizeunit2[unit2] * 1000) + 5) / 10) / 100, sizeunit2_short[unit2], sizeunit2_long[unit2]);
+			sprintf(sizeStr, "%s%0.12g %s (%s)", sizeStr,   (double) (((long long int) ((double) size_rounded / sizeunit2[unit2] * 1000) + 5) / 10) / 100, sizeunit2_short[unit2], sizeunit2_long[unit2]);
 			break;
 	}
 	
@@ -87,14 +87,14 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
 {
 	struct statfs fsInfo;
 	int ret = statfs(inFile, &fsInfo);
-// 	fprintf( stderr, "statfs=%d f_type=%u ISREG=%d UF_COMPRESSED=%d compressable=%d\n",
-// 			 ret, fsInfo.f_type, S_ISREG(inFileInfo->st_mode), (inFileInfo->st_flags & UF_COMPRESSED),
-// 			 ret >= 0 && fsInfo.f_type == 17
-// 				&& S_ISREG(inFileInfo->st_mode)
-// 				&& (inFileInfo->st_flags & UF_COMPRESSED) == 0 );
+//	fprintf( stderr, "statfs=%d f_type=%u ISREG=%d UF_COMPRESSED=%d compressable=%d\n",
+//			ret, fsInfo.f_type, S_ISREG(inFileInfo->st_mode), (inFileInfo->st_flags & UF_COMPRESSED),
+//			ret >= 0 && fsInfo.f_type == 17
+//				&& S_ISREG(inFileInfo->st_mode)
+//				&& (inFileInfo->st_flags & UF_COMPRESSED) == 0 );
 	return (ret >= 0 && fsInfo.f_type == 17
-	    && S_ISREG(inFileInfo->st_mode)
-	    && (inFileInfo->st_flags & UF_COMPRESSED) == 0);
+		&& S_ISREG(inFileInfo->st_mode)
+		&& (inFileInfo->st_flags & UF_COMPRESSED) == 0);
 }
 
 #if SUPPORT_PARALLEL
@@ -192,10 +192,10 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	numBlocks = (filesize + compblksize - 1) / compblksize;
 	if ((filesize + 0x13A + (numBlocks * 9)) > 2147483647) {
-// 		if (folderinfo->print_info > 2)
-// 		{
+//		if (folderinfo->print_info > 2)
+//		{
 			fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
-// 		}
+//		}
 		return;
 	}
 
@@ -233,8 +233,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	fclose(in); in = NULL;
 	if (backupFile)
 	{ int fd;
-	  FILE *fp;
-	  char *infile;
+	 FILE *fp;
+	 char *infile;
 		if (!(infile = strdup(inFile))
 			|| asprintf(&backupName, "/tmp/afsctool-backup-%s-XXXXXXXXXX", basename(infile)) < 0)
 		{
@@ -369,8 +369,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		locked = lockParallelProcessorIO(worker);
 	}
 #else
-    signal(SIGINT, SIG_IGN);
-    signal(SIGHUP, SIG_IGN);
+	signal(SIGINT, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
 #endif
 	in = fopen(inFile, "w");
 	if (in == NULL)
@@ -491,7 +491,7 @@ bail:
 	}
 #ifndef SUPPORT_PARALLEL
 	signal(SIGINT, SIG_DFL);
-    signal(SIGHUP, SIG_DFL);
+	signal(SIGHUP, SIG_DFL);
 #endif
 	xfree(inBuf);
 	xfree(outBuf);
@@ -510,9 +510,9 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 	char *xattrnames, *curr_attr;
 	ssize_t xattrnamesize, indecmpfsLen = 0, inRFLen = 0, getxattrret, RFpos = 0;
 	struct timeval times[2];
-    UInt32 orig_mode;
+	UInt32 orig_mode;
 
-    if (quitRequested)
+	if (quitRequested)
 	{
 		return;
 	}
@@ -529,11 +529,11 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		return;
 	if ((inFileInfo->st_flags & UF_COMPRESSED) == 0)
 		return;
-    orig_mode = inFileInfo->st_mode;
-    if ((orig_mode & S_IWUSR) == 0) {
-        chmod(inFile, orig_mode | S_IWUSR);
-        lstat(inFile, inFileInfo);
-    }
+	orig_mode = inFileInfo->st_mode;
+	if ((orig_mode & S_IWUSR) == 0) {
+		chmod(inFile, orig_mode | S_IWUSR);
+		lstat(inFile, inFileInfo);
+	}
 	if ((orig_mode & S_IRUSR) == 0) {
 		chmod(inFile, orig_mode | S_IRUSR);
 		lstat(inFile, inFileInfo);
@@ -847,10 +847,10 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 	}
 
 bail:
-    utimes(inFile, times);
-    if (inFileInfo->st_mode != orig_mode) {
-        chmod(inFile, orig_mode);
-    }
+	utimes(inFile, times);
+	if (inFileInfo->st_mode != orig_mode) {
+		chmod(inFile, orig_mode);
+	}
 	if (inBuf != NULL)
 		free(inBuf);
 	if (indecmpfsBuf != NULL)
@@ -1557,16 +1557,16 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 						if (folderinfo->filetypeslist == NULL || filetype_found)
 						{
 #ifdef SUPPORT_PARALLEL
-                            if (PP)
-                            {
+							if (PP)
+							{
 								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp))
 									addFileToParallelProcessor( PP, currfile->fts_path, currfile->fts_statp, folderinfo, false );
 								else
 									process_file(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
-                            }
-                            else
+							}
+							else
 #endif
-                                compressFile(currfile->fts_path, currfile->fts_statp, folderinfo, NULL);
+								compressFile(currfile->fts_path, currfile->fts_statp, folderinfo, NULL);
 						}
 						lstat(currfile->fts_path, currfile->fts_statp);
 						if (((currfile->fts_statp->st_flags & UF_COMPRESSED) == 0) && folderinfo->print_files)
@@ -1612,9 +1612,9 @@ void printUsage()
 		   "Create archive file with compressed data in data fork:    afsctool -a[d] src dst [... srcN dstN]\n"
 		   "Extract HFS+ compression archive to file:                 afsctool -x[d] src dst [... srcN dstN]\n"
 #ifdef SUPPORT_PARALLEL
-           "Apply HFS+ compression to file or folder:                 afsctool -c[nlfvvib] [-jN|-JN] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
+		   "Apply HFS+ compression to file or folder:                 afsctool -c[nlfvvib] [-jN|-JN] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
 #else
-           "Apply HFS+ compression to file or folder:                 afsctool -c[nlfvvib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
+		   "Apply HFS+ compression to file or folder:                 afsctool -c[nlfvvib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
 #endif
 		   "Options:\n"
 		   "-v Increase verbosity level\n"
@@ -1627,10 +1627,10 @@ void printUsage()
 		   "-t <ContentType/Extension> Return statistics for files of given content type and when compressing,\n"
 		   "                           if this option is given then only files of content type(s) or extension(s) specified with this option will be compressed\n"
 		   "-i Compress or show statistics for files that don't have content type(s) or extension(s) given by -t <ContentType/Extension> instead of those that do\n"
-           "-b make a backup of files before compressing them\n"
+		   "-b make a backup of files before compressing them\n"
 #ifdef SUPPORT_PARALLEL
-           "-jN compress (only compressable) files using <N> threads (compression is concurrent, disk IO is exclusive)\n"
-           "-JN read, compress and write files (only compressable ones) using <N> threads (everything including disk IO is concurrent)\n"
+		   "-jN compress (only compressable) files using <N> threads (compression is concurrent, disk IO is exclusive)\n"
+		   "-JN read, compress and write files (only compressable ones) using <N> threads (everything including disk IO is concurrent)\n"
 #endif
 		   "-<level> Compression level to use when compressing (ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n");
 }
@@ -1662,6 +1662,7 @@ int afsctool (int argc, const char * argv[])
 	UInt16 big16;
 	UInt64 big64;
 	int nJobs = 0;
+	bool testQueue = false;
 
 	folderinfo.filetypeslist = NULL;
 	folderinfo.filetypeslistlen = 0;
@@ -1834,6 +1835,7 @@ int afsctool (int argc, const char * argv[])
 #ifdef SUPPORT_PARALLEL
 				case 'j':
 				case 'J':
+				case 'T':
 					if (!applycomp)
 					{
 						printUsage();
@@ -1842,6 +1844,10 @@ int afsctool (int argc, const char * argv[])
 					if (argv[i][j] == 'J')
 					{
 						exclusive_io = false;
+					}
+					else if (argv[i][j] == 'T')
+					{
+						testQueue = true;
 					}
 					nJobs = atoi(&argv[i][j+1]);
 					if (nJobs <= 0)
@@ -1868,21 +1874,21 @@ next_arg:;
 	}
 
 #ifdef SUPPORT_PARALLEL
-    if (nJobs > 0)
-    {
-        PP = createParallelProcessor(nJobs, printVerbose);
-// 		if (PP)
-// 		{
-// 			if (printVerbose)
-// 			{
-// 				printf( "Verbose mode switched off in parallel processing mode\n");
-// 			}
-// 			printVerbose = false;
-// 		}
-    }
+	if (nJobs > 0)
+	{
+		PP = createParallelProcessor(nJobs, printVerbose);
+//		if (PP)
+//		{
+//			if (printVerbose)
+//			{
+//				printf( "Verbose mode switched off in parallel processing mode\n");
+//			}
+//			printVerbose = false;
+//		}
+	}
 #endif
 
-    // ignore signals due to exceeding CPU or file size limits
+	// ignore signals due to exceeding CPU or file size limits
 	signal(SIGXCPU, SIG_IGN);
 	signal(SIGXFSZ, SIG_IGN);
 
@@ -1969,8 +1975,8 @@ next_arg:;
 			fi.check_files = fileCheck;
 			fi.backup_file = backupFile;
 #ifdef SUPPORT_PARALLEL
-            if (PP)
-            {
+			if (PP)
+			{
 				if (fileIsCompressable(fullpath, &fileinfo))
 				{
 					addFileToParallelProcessor( PP, fullpath, &fileinfo, &fi, true );
@@ -1979,10 +1985,10 @@ next_arg:;
 				{
 					process_file(fullpath, NULL, &fileinfo, getParallelProcessorJobInfo(PP));
 				}
-            }
-            else
+			}
+			else
 #endif
-                compressFile(fullpath, &fileinfo, &fi, NULL);
+				compressFile(fullpath, &fileinfo, &fi, NULL);
 			lstat(fullpath, &fileinfo);
 		}
 		
@@ -2191,7 +2197,7 @@ next_arg:;
 			if ((currfolder = fts_open(folderarray, FTS_PHYSICAL, NULL)) == NULL)
 			{
 				fprintf(stderr, "%s: %s\n", fullpath, strerror(errno));
-// 				exit(EACCES);
+//				exit(EACCES);
 				continue;
 			}
 			while ((currfile = fts_read(currfolder)) != NULL)
@@ -2257,7 +2263,7 @@ next_arg:;
 			if ((currfolder = fts_open(folderarray, FTS_PHYSICAL, NULL)) == NULL)
 			{
 				fprintf(stderr, "%s: %s\n", fullpath, strerror(errno));
-// 				exit(EACCES);
+//				exit(EACCES);
 				continue;
 			}
 			folderinfo.uncompressed_size = 0;
@@ -2442,24 +2448,28 @@ next_arg:;
 #ifdef SUPPORT_PARALLEL
 	if (PP)
 	{
-		if (filesInParallelProcessor(PP))
+		if (!testQueue)
 		{
-			signal(SIGINT, signal_handler);
-			signal(SIGHUP, signal_handler);
-			fprintf( stderr, "Starting %d worker threads to process queue with %lu items\n", nJobs, filesInParallelProcessor(PP) );
-			int processed = runParallelProcessor(PP);
-			fprintf( stderr, "Processed %d entries\n", processed );
-			if (printVerbose > 0)
+			if (filesInParallelProcessor(PP))
 			{
-				struct folder_info *fInfo = getParallelProcessorJobInfo(PP);
-				if (fInfo->num_files > 0)
+				signal(SIGINT, signal_handler);
+				signal(SIGHUP, signal_handler);
+				fprintf( stderr, "Starting %d worker threads to process queue with %lu items\n",
+					nJobs, filesInParallelProcessor(PP) );
+				int processed = runParallelProcessor(PP);
+				fprintf( stderr, "Processed %d entries\n", processed );
+				if (printVerbose > 0)
 				{
-					printFolderInfo( getParallelProcessorJobInfo(PP), hardLinkCheck );
+					struct folder_info *fInfo = getParallelProcessorJobInfo(PP);
+					if (fInfo->num_files > 0)
+					{
+						printFolderInfo( getParallelProcessorJobInfo(PP), hardLinkCheck );
+					}
 				}
 			}
+			else
+				fprintf( stderr, "No compressable files found.\n" );
 		}
-		else
-			fprintf( stderr, "No compressable files found.\n" );
 		releaseParallelProcessor(PP);
 	}
 #endif

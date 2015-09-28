@@ -24,8 +24,8 @@ extern "C" {
 ParallelFileProcessor *createParallelProcessor(const int n, const int verboseLevel);
 void releaseParallelProcessor(ParallelFileProcessor *p);
 bool addFileToParallelProcessor(ParallelFileProcessor *p, const char *inFile,
-                                const struct stat *inFileInfo, struct folder_info *folderinfo,
-                                const bool ownInfo);
+								const struct stat *inFileInfo, struct folder_info *folderinfo,
+								const bool ownInfo);
 size_t filesInParallelProcessor(ParallelFileProcessor *p);
 // attempt to lock the ioLock; returns a success value that should be passed to unLockParallelProcessorIO()
 bool lockParallelProcessorIO(FileProcessor *worker);

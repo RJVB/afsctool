@@ -28,83 +28,83 @@ extern "C" {
 
 struct folder_info
 {
-    long long int uncompressed_size;
-    long long int uncompressed_size_rounded;
-    long long int compressed_size;
-    long long int compressed_size_rounded;
-    long long int compattr_size;
-    long long int total_size;
-    long long int num_compressed;
-    long long int num_files;
-    long long int num_hard_link_files;
-    long long int num_folders;
-    long long int num_hard_link_folders;
-    long long int maxSize;
-    int print_info;
-    int compressionlevel;
-    double minSavings;
-    bool print_files;
-    bool compress_files;
-    bool allowLargeBlocks;
-    bool check_files;
-    bool check_hard_links;
-    struct filetype_info *filetypes;
-    long long int numfiletypes;
-    long long int filetypessize;
-    char **filetypeslist;
-    int filetypeslistlen;
-    int filetypeslistsize;
-    bool invert_filetypelist;
-    bool backup_file;
+	long long int uncompressed_size;
+	long long int uncompressed_size_rounded;
+	long long int compressed_size;
+	long long int compressed_size_rounded;
+	long long int compattr_size;
+	long long int total_size;
+	long long int num_compressed;
+	long long int num_files;
+	long long int num_hard_link_files;
+	long long int num_folders;
+	long long int num_hard_link_folders;
+	long long int maxSize;
+	int print_info;
+	int compressionlevel;
+	double minSavings;
+	bool print_files;
+	bool compress_files;
+	bool allowLargeBlocks;
+	bool check_files;
+	bool check_hard_links;
+	struct filetype_info *filetypes;
+	long long int numfiletypes;
+	long long int filetypessize;
+	char **filetypeslist;
+	int filetypeslistlen;
+	int filetypeslistsize;
+	bool invert_filetypelist;
+	bool backup_file;
 #ifdef __cplusplus
 public:
-    folder_info()
-    {
-        memset( this, 0, sizeof(struct folder_info) );
-    }
-    folder_info(const struct folder_info *src)
-    {
-        init(src);
-    }
-    folder_info(const struct folder_info &src)
-    {
-        init(&src);
-    }
+	folder_info()
+	{
+		memset( this, 0, sizeof(struct folder_info) );
+	}
+	folder_info(const struct folder_info *src)
+	{
+		init(src);
+	}
+	folder_info(const struct folder_info &src)
+	{
+		init(&src);
+	}
 private:
-    void init(const struct folder_info *src)
-    {
-//         fprintf( stderr, "folder_info::init(%p): copying to this=%p\n", src, this );
-        memcpy( this, src, sizeof(struct folder_info) );
-        // we don't duplicate the filetypeslist!
-        filetypeslist = NULL;
-        filetypeslistlen = filetypeslistsize = 0;
-    }
+	void init(const struct folder_info *src)
+	{
+//		   fprintf( stderr, "folder_info::init(%p): copying to this=%p\n", src, this );
+		memcpy( this, src, sizeof(struct folder_info) );
+		// we don't duplicate the filetypeslist!
+		filetypeslist = NULL;
+		filetypeslistlen = filetypeslistsize = 0;
+	}
 #endif
 };
 
 struct filetype_info
 {
-    char *filetype;
-    char **extensions;
-    int extensionssize;
-    int numextensions;
-    long long int uncompressed_size;
-    long long int uncompressed_size_rounded;
-    long long int compressed_size;
-    long long int compressed_size_rounded;
-    long long int compattr_size;
-    long long int total_size;
-    long long int num_compressed;
-    long long int num_files;
-    long long int num_hard_link_files;
+	char *filetype;
+	char **extensions;
+	int extensionssize;
+	int numextensions;
+	long long int uncompressed_size;
+	long long int uncompressed_size_rounded;
+	long long int compressed_size;
+	long long int compressed_size_rounded;
+	long long int compattr_size;
+	long long int total_size;
+	long long int num_compressed;
+	long long int num_files;
+	long long int num_hard_link_files;
 };
 
 #if SUPPORT_PARALLEL
-#   ifdef __cplusplus
+#	ifdef __cplusplus
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker=NULL);
-#   else
+#	else
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker);
-#   endif
+#	endif
 #else
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo);
 #endif

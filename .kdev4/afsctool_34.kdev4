@@ -7,17 +7,17 @@ Current Build Directory Index=0
 ProjectRootRelative=./
 
 [CMake][CMake Build Directory 0]
-Build Directory Path=file:///Volumes/Debian/MP9/var/macports/build/_Volumes_Debian_MP9_site-ports_sysutils_afsctool/afsctool/work/build
+Build Directory Path=file:///opt/local/var/macports/build/_Volumes_Debian_MP9_site-ports_sysutils_afsctool/afsctool/work/build
 Build Type=MacPorts
-CMake Binary=file:///Volumes/Debian/MP9/bin/cmake
+CMake Binary=file:///opt/local/bin/cmake
 Environment Profile=
 Extra Arguments=
 Install Directory=file:///opt/local
 
 [CMake][CMake Build Directory 1]
-Build Directory Path=file:///Volumes/Debian/Users/bertin/work/src/MacOSX/afsctool_34/build
+Build Directory Path=file:///Users/bertin/cworks/MacOSX/afsctool_34/build
 Build Type=Debug
-CMake Binary=file:///Volumes/Debian/MP9/bin/cmake
+CMake Binary=file:///opt/local/bin/cmake
 Environment Profile=
 Extra Arguments=-Wno-dev
 Install Directory=file:///opt/local

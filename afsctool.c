@@ -232,22 +232,41 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 	fclose(in); in = NULL;
 	if (backupFile)
-	{ int fd;
-	 FILE *fp;
-	 char *infile;
-		if (!(infile = strdup(inFile))
-			|| asprintf(&backupName, "/tmp/afsctool-backup-%s-XXXXXXXXXX", basename(infile)) < 0)
+	{ int fd, bkNameLen;
+	  FILE *fp;
+	  char *infile, *inname = NULL;
+		if ((infile = strdup(inFile)))
+		{ 
+			inname = basename(infile);
+			// avoid filename overflow; assume 32 fixed template char for mkstemps
+			// just to be on the safe side (even in parallel mode).
+			if (strlen(inname) > 1024 - 32)
+			{
+				// truncate
+				inname[1024-32] = '\0';
+			}
+#ifdef SUPPORT_PARALLEL
+			// add the processor ID for the unlikely case that 2 threads try to backup a file with the same name
+			// at the same time, and mkstemps() somehow generates the same temp. name. I've seen it generate EEXIST
+			// errors which suggest that might indeed happen.
+			bkNameLen = asprintf(&backupName, "/tmp/afsctbk.%d.XXXXXXXXXX.%s", currentParallelProcesorID(worker), inname);
+#else
+			bkNameLen = asprintf(&backupName, "/tmp/afsctbk.XXXXXXXXXX.%s", inname);
+#endif
+		}
+		if (!infile || bkNameLen < 0)
 		{
 			fprintf(stderr, "%s: malloc error, unable to generate temporary backup filename (%s)\n", inFile, strerror(errno));
 			xfree(infile);
 			goto bail;
 		}
-		xfree(infile);
-		if ((fd = mkstemp(backupName)) < 0 || !(fp = fdopen(fd, "w")))
+		if ((fd = mkstemps(backupName, strlen(inname)) < 0 || !(fp = fdopen(fd, "w")))
 		{
 			fprintf(stderr, "%s: error creating temporary backup file %s (%s)\n", inFile, backupName, strerror(errno));
+			xfree(infile);
 			goto bail;
 		}
+		xfree(infile);
 		if (fwrite(inBuf, filesize, 1, fp) != 1)
 		{
 			fprintf(stderr, "%s: Error writing to backup file %s (%lld bytes; %s)\n", inFile, backupName, filesize, strerror(errno));

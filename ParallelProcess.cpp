@@ -1,3 +1,4 @@
+// kate: auto-insert-doxygen true; backspace-indents true; indent-width 4; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 4;
 /*
  * @file ParallelProcess.cpp
  * Copyright 2015 René J.V. Bertin
@@ -346,6 +347,15 @@ bool unLockParallelProcessorIO(FileProcessor *worker)
 		locked = worker->unLockScope();
 	}
 	return locked;
+}
+
+// return the current worker ID (thread number)
+int currentParallelProcessorID(FileProcessor *worker)
+{ int procID = -1;
+	if( worker ){
+		procID = worker->processorID();
+	}
+	return procID;
 }
 
 int runParallelProcessor(ParallelFileProcessor *p)

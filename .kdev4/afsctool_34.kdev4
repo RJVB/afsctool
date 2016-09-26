@@ -8,7 +8,7 @@ ProjectRootRelative=./
 
 [CMake][CMake Build Directory 0]
 Build Directory Path=file:///Volumes/Debian/MP9/var/macports/build/_Volumes_Debian_MP9_site-ports_sysutils_afsctool/afsctool/work/build
-Build Type=Release
+Build Type=MacPorts
 CMake Binary=file:///Volumes/Debian/MP9/bin/cmake
 Environment Profile=
 Extra Arguments=

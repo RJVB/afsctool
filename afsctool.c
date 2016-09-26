@@ -97,6 +97,26 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
 		&& (inFileInfo->st_flags & UF_COMPRESSED) == 0);
 }
 
+/*! Mac OS X basename() can modify the input string when not in 'legacy' mode on 10.6
+ * and indeed it does. So we use our own which doesn't, and also doesn't require internal
+ * storage.
+ */
+static const char *lbasename(const char *url)
+{ const char *c = NULL;
+	if (url)
+	{
+		if ((c =  strrchr( url, '/' )))
+		{
+			c++;
+		}
+		else
+		{
+			c = url;
+		}
+	}
+	return c;
+}
+
 #if SUPPORT_PARALLEL
 void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker )
 #else
@@ -237,7 +257,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	  char *infile, *inname = NULL;
 		if ((infile = strdup(inFile)))
 		{ 
-			inname = basename(infile);
+			inname = (char*) lbasename(infile);
 			// avoid filename overflow; assume 32 fixed template char for mkstemps
 			// just to be on the safe side (even in parallel mode).
 			if (strlen(inname) > 1024 - 32)
@@ -249,7 +269,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			// add the processor ID for the unlikely case that 2 threads try to backup a file with the same name
 			// at the same time, and mkstemps() somehow generates the same temp. name. I've seen it generate EEXIST
 			// errors which suggest that might indeed happen.
-			bkNameLen = asprintf(&backupName, "/tmp/afsctbk.%d.XXXXXX.%s", currentParallelProcesorID(worker), inname);
+			bkNameLen = asprintf(&backupName, "/tmp/afsctbk.%d.XXXXXX.%s", currentParallelProcessorID(worker), inname);
 #else
 			bkNameLen = asprintf(&backupName, "/tmp/afsctbk.XXXXXX.%s", inname);
 #endif
@@ -260,7 +280,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			xfree(infile);
 			goto bail;
 		}
-		if ((fd = mkstemps(backupName, strlen(inname)) < 0 || !(fp = fdopen(fd, "w")))
+		if ((fd = mkstemps(backupName, strlen(inname)+1)) < 0 || !(fp = fdopen(fd, "w")))
 		{
 			fprintf(stderr, "%s: error creating temporary backup file %s (%s)\n", inFile, backupName, strerror(errno));
 			xfree(infile);

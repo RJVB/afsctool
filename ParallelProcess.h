@@ -31,7 +31,7 @@ size_t filesInParallelProcessor(ParallelFileProcessor *p);
 bool lockParallelProcessorIO(FileProcessor *worker);
 // unlock the ioLock if it was previously locked by a call to lockParallelProcessorIO()
 bool unLockParallelProcessorIO(FileProcessor *worker);
-int currentParallelProcesorID(FileProcessor *worker);
+int currentParallelProcessorID(FileProcessor *worker);
 int runParallelProcessor(ParallelFileProcessor *p);
 void stopParallelProcessor(ParallelFileProcessor *p);
 struct folder_info *getParallelProcessorJobInfo(ParallelFileProcessor *p);

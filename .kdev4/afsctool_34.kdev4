@@ -161,7 +161,7 @@ pattern=__pycache__
 targets=2
 
 [MakeBuilder]
-Additional Options=--nice 10 -w VERBOSE=1 V=1
+Additional Options=--nice 10 --MP -w VERBOSE=1 V=1
 Default Make Environment Profile=KDE/MacPorts
 Make Binary=wmake
 Number Of Jobs=1

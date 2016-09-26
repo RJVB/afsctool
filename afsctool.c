@@ -249,9 +249,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			// add the processor ID for the unlikely case that 2 threads try to backup a file with the same name
 			// at the same time, and mkstemps() somehow generates the same temp. name. I've seen it generate EEXIST
 			// errors which suggest that might indeed happen.
-			bkNameLen = asprintf(&backupName, "/tmp/afsctbk.%d.XXXXXXXXXX.%s", currentParallelProcesorID(worker), inname);
+			bkNameLen = asprintf(&backupName, "/tmp/afsctbk.%d.XXXXXX.%s", currentParallelProcesorID(worker), inname);
 #else
-			bkNameLen = asprintf(&backupName, "/tmp/afsctbk.XXXXXXXXXX.%s", inname);
+			bkNameLen = asprintf(&backupName, "/tmp/afsctbk.XXXXXX.%s", inname);
 #endif
 		}
 		if (!infile || bkNameLen < 0)

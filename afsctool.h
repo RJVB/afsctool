@@ -99,7 +99,7 @@ struct filetype_info
 	long long int num_hard_link_files;
 };
 
-#if SUPPORT_PARALLEL
+#ifdef SUPPORT_PARALLEL
 #	ifdef __cplusplus
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker=NULL);
 #	else

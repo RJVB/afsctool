@@ -117,7 +117,7 @@ static const char *lbasename(const char *url)
 	return c;
 }
 
-#if SUPPORT_PARALLEL
+#ifdef SUPPORT_PARALLEL
 void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker )
 #else
 void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo)
@@ -404,7 +404,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 
 #ifdef SUPPORT_PARALLEL
-	if( exclusive_io && worker ){
+	// 20160928: the actual rewrite of the file is never done in parallel
+	if( worker ){
 		locked = lockParallelProcessorIO(worker);
 	}
 #else
@@ -512,7 +513,7 @@ bail:
 		chmod(inFile, orig_mode);
 	}
 #ifdef SUPPORT_PARALLEL
-	if( exclusive_io && worker ){
+	if( worker ){
 		locked = unLockParallelProcessorIO(worker);
 	}
 #endif
@@ -1669,7 +1670,7 @@ void printUsage()
 		   "-b make a backup of files before compressing them\n"
 #ifdef SUPPORT_PARALLEL
 		   "-jN compress (only compressable) files using <N> threads (compression is concurrent, disk IO is exclusive)\n"
-		   "-JN read, compress and write files (only compressable ones) using <N> threads (everything including disk IO is concurrent)\n"
+		   "-JN read, compress and write files (only compressable ones) using <N> threads (everything is concurrent except writing the compressed file)\n"
 #endif
 		   "-<level> Compression level to use when compressing (ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n");
 }

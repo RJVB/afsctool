@@ -92,6 +92,7 @@ ParallelFileProcessor::ParallelFileProcessor(const int n, const int verbose)
 {
 	threadPool.clear();
 	nJobs = n;
+	nProcessing = 0;
 	nProcessed = 0;
 	allDoneEvent = NULL;
 	ioLock = new CRITSECTLOCK(4000);
@@ -157,7 +158,11 @@ int ParallelFileProcessor::run()
 	}
 	if( allDoneEvent ){
 	 DWORD waitResult = ~WAIT_OBJECT_0;
-		while( nJobs >= 1 && !quitRequested() && size() > 0 && waitResult != WAIT_OBJECT_0 ){
+		// contrary to what one might expect, we should NOT use size()==0 as a stopping criterium.
+		// The queue size is decreased when a worker picks a new file to process, not when it's
+		// finished. Using size()==0 as a stopping criterium caused the processing interrupts
+		// that were observed with large files.
+		while( nJobs >= 1 && !quitRequested() && waitResult != WAIT_OBJECT_0 ){
 			waitResult = WaitForSingleObject( allDoneEvent, 2000 );
 			if( nJobs ){
 			 double perc = 100.0 * nProcessed / N;
@@ -176,10 +181,15 @@ int ParallelFileProcessor::run()
 					 prevPerc = perc;
 				 }
 			}
-			if( quitRequested() && !threadPool.empty() ){
-				// the WaitForSingleObject() call above was interrupted by the signal that
-				// led to quitRequested() being set and as a result the workers haven't yet
-				// had the chance to exit cleanly. Give them that chance now.
+		}
+		if( (quitRequested() && !threadPool.empty()) || nProcessing > 0 ){
+			// the WaitForSingleObject() call above was interrupted by the signal that
+			// led to quitRequested() being set and as a result the workers haven't yet
+			// had the chance to exit cleanly. Give them that chance now.
+			fprintf( stderr, " quitting [%ld]...", nProcessing ); fflush(stderr);
+			waitResult = WaitForSingleObject( allDoneEvent, 2000 );
+			for( i = 0 ; i < 4 && waitResult == WAIT_TIMEOUT ; ++i ){
+				fprintf( stderr, " [%ld]...", nProcessing) ; fflush(stderr);
 				waitResult = WaitForSingleObject( allDoneEvent, 2000 );
 			}
 		}
@@ -191,7 +201,11 @@ int ParallelFileProcessor::run()
 	while( !threadPool.empty() ){
 	 FileProcessor *thread = threadPool.front();
 		if( thread->GetExitCode() == (THREAD_RETURN)STILL_ACTIVE ){
-			fprintf( stderr, "Stopping worker thread #%d that is still active!\n", i );
+			fprintf( stderr, "Stopping worker thread #%d that is still %s!\n", i, (thread->scope)? "processing" : "active" );
+			std::string currentFileName = thread->currentFileName();
+			if( currentFileName.c_str()[0] ){
+				fprintf( stderr, "\tcurrent file: %s\n", currentFileName.c_str() );
+			}
 			thread->Stop(true);
 		}
 		if( thread->nProcessed ){
@@ -229,10 +243,10 @@ int ParallelFileProcessor::run()
 
 int ParallelFileProcessor::workerDone(FileProcessor *worker)
 { CRITSECTLOCK::Scope scope(threadLock);
-  char name[17];
+// 	char name[17];
+// 	pthread_getname_np( (pthread_t) GetThreadId(worker->GetThread()), name, sizeof(name) );
+// 	fprintf( stderr, "workerDone(): worker \"%s\" is done; %ld workers left\n", name, nJobs - 1 );
 	nJobs -= 1;
-	pthread_getname_np( (pthread_t) GetThreadId(worker->GetThread()), name, sizeof(name) );
-//	   fprintf( stderr, "workerDone(): worker \"%s\" is done\n", name );
 	if( nJobs <= 0 ){
 		if( allDoneEvent ){
 			SetEvent(allDoneEvent);
@@ -252,8 +266,15 @@ DWORD FileProcessor::Run(LPVOID arg)
 		 // create a scoped lock without closing it immediately
 		 CRITSECTLOCK::Scope scp(PP->ioLock, 0);
 			scope = &scp;
+			currentEntry = &entry;
+			_InterlockedIncrement(&PP->nProcessing);
 			entry.compress( this, PP );
+			_InterlockedDecrement(&PP->nProcessing);
 			_InterlockedIncrement(&PP->nProcessed);
+			currentEntry = NULL;
+			nProcessed += 1;
+			scope = NULL;
+
 			runningTotalRaw += entry.fileInfo.st_size;
 			runningTotalCompressed += (entry.compressedSize > 0)? entry.compressedSize : entry.fileInfo.st_size;
 			if( PP->verbose() > 1 ){
@@ -264,8 +285,6 @@ DWORD FileProcessor::Run(LPVOID arg)
 					 cpuUsage += info.cpu_usage/10.0;
 				}
 			}
-			nProcessed += 1;
-			scope = NULL;
 		}
 	}
 	return DWORD(nProcessed);
@@ -281,19 +300,25 @@ void FileProcessor::InitThread()
 
 inline bool FileProcessor::lockScope()
 {
-	if( scope ){
-		PP->ioLockedFlag = scope->Lock();
+	if( PP ){
+		if( scope ){
+			PP->ioLockedFlag = scope->Lock();
+		}
+		return PP->ioLockedFlag;
 	}
-	return PP->ioLockedFlag;
+	return false;
 }
 
 inline bool FileProcessor::unLockScope()
 {
-	if( scope ){
-		scope->Unlock();
-		PP->ioLockedFlag = *scope;
+	if( PP ){
+		if( scope ){
+			scope->Unlock();
+			PP->ioLockedFlag = *scope;
+		}
+		return PP->ioLockedFlag;
 	}
-	return PP->ioLockedFlag;
+	return false;
 }
 
 // ================================= C interface functions =================================

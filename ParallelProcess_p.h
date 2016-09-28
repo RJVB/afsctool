@@ -1,4 +1,4 @@
-// kate: auto-insert-doxygen true; backspace-indents true; indent-width 4; keep-extra-spaces true; replace-tabs true; tab-indents true; tab-width 4;
+// kate: auto-insert-doxygen true; backspace-indents true; indent-width 4; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 4;
 
 /*
  * @file ParallelProcess_p.h
@@ -157,6 +157,8 @@ protected:
 	int workerDone(FileProcessor *worker);
 	// the number of configured or active worker threads
 	volatile long nJobs;
+	// the number of processing threads
+	volatile long nProcessing;
 	// the number of processed items
 	volatile long nProcessed;
 	// a pool containing pointers to the worker threads
@@ -183,7 +185,15 @@ public:
 		, runningTotalCompressed(0)
 		, runningTotalRaw(0)
 		, cpuUsage(0.0)
+		, currentEntry(NULL)
 	{}
+	~FileProcessor()
+    {
+		// better be safe than sorry
+		PP = NULL;
+		scope = NULL;
+		currentEntry = NULL;
+    }
 	bool lockScope();
 	bool unLockScope();
 
@@ -192,6 +202,10 @@ public:
 		return procID;
 	}
 
+	inline std::string currentFileName() const
+	{
+		return (currentEntry)? currentEntry->fileName : "";
+	}
 protected:
 	DWORD Run(LPVOID arg);
 	void InitThread();
@@ -210,6 +224,8 @@ protected:
 	const int procID;
 	CRITSECTLOCK::Scope *scope;
 	friend class ParallelFileProcessor;
+private:
+	FileEntry *currentEntry;
 };
 
 

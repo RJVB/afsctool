@@ -109,13 +109,16 @@ ParallelFileProcessor *createParallelProcessor(const int n, const int verboseLev
 
 // attempt to lock the ioLock; returns a success value
 bool ParallelFileProcessor::lockIO()
-{
+{ DWORD pid = GetCurrentThreadId();
 	if( ioLock ){
+		bool wasLocked = (ioLock->IsLocked() && (ioLockingThread != pid));
 		ioLock->Lock(ioLockedFlag);
-//		   fprintf( stderr, "lockIO() returning %d\n", ioLockedFlag );
+		if( wasLocked ){
+			ioLock->lockCounter += 1;
+		}
 	}
 	if( ioLockedFlag ){
-		ioLockingThread = GetCurrentThreadId();
+		ioLockingThread = pid;
 	}
 	return ioLockedFlag;
 }
@@ -126,7 +129,6 @@ bool ParallelFileProcessor::unLockIO()
 	if( ioLock ){
 		ioLock->Unlock(ioLockedFlag);
 		ioLockedFlag = ioLock->IsLocked();
-//		   fprintf( stderr, "unLockIO() returning %d\n", ioLockedFlag );
 	}
 	if( !ioLockedFlag && ioLockingThread == GetCurrentThreadId() ){
 		ioLockingThread = 0;
@@ -302,7 +304,11 @@ inline bool FileProcessor::lockScope()
 {
 	if( PP ){
 		if( scope ){
+			bool wasLocked = scope->IsLocked();
 			PP->ioLockedFlag = scope->Lock();
+			if( wasLocked && scope->Parent() ){
+				scope->Parent()->lockCounter += 1;
+			}
 		}
 		return PP->ioLockedFlag;
 	}

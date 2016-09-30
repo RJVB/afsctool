@@ -255,7 +255,7 @@ static inline void _InterlockedSetFalse( volatile long *atomic )
 /*!
 	A critical section class API-compatible with Vladislav Gelfer's CritSectEx
 	This class uses a simple platform-specific mutex except where native mutexes
-	don't provide a timed wait. In that case (OS X), the msemul layer is ued to
+	don't provide a timed wait. In that case (OS X), the msemul layer is used to
 	emulate CreateSemaphore/ReleaseSemaphore given that a mutex is a semaphore
 	with starting value 1. Note however that this imposes the limits that come
 	with pthread's sem_open et al (semaphores count to the limit of open files).
@@ -409,6 +409,7 @@ public:
 #endif
 #ifdef DEBUG
 		m_hLockerThreadId = -1;
+		lockCounter = 0;
 		init_HRTime();
 #endif
 	}
@@ -470,7 +471,7 @@ public:
 		Scope(const Scope&);
 		void operator = (const Scope&);
 
-		MutexEx* m_pCs;
+		MutexEx *m_pCs;
 		bool m_bLocked;
 		bool m_bUnlockFlag;
 
@@ -488,7 +489,7 @@ public:
 			m_bLocked = m_pCs->Lock(m_bUnlockFlag, dwTimeout);
 		}
 
-		__forceinline void InternalLock(MutexEx& cs, DWORD dwTimeout)
+		__forceinline void InternalLock(MutexEx &cs, DWORD dwTimeout)
 		{
 			m_bUnlockFlag = false;
 			m_pCs = &cs;
@@ -513,7 +514,7 @@ public:
 			,verbose(false)
 		{
 		}
-		__forceinline Scope(MutexEx& cs, DWORD dwTimeout = INFINITE)
+		__forceinline Scope(MutexEx &cs, DWORD dwTimeout = INFINITE)
 		{
 			verbose = false;
 			if( dwTimeout ){
@@ -549,7 +550,7 @@ public:
 			InternalUnlock();
 		}
 
-		bool Lock(MutexEx& cs, DWORD dwTimeout = INFINITE)
+		bool Lock(MutexEx &cs, DWORD dwTimeout = INFINITE)
 		{
 			if (&cs == m_pCs)
 				return Lock(dwTimeout);
@@ -585,6 +586,10 @@ public:
 			}
 		}
 		__forceinline bool IsLocked() const { return m_bLocked; }
+		__forceinline MutexEx *Parent()
+		{
+			return m_pCs;
+		}
 		operator bool () const { return m_bLocked; }
 	};
 	friend class Scope;

@@ -60,20 +60,21 @@ public:
 	// return the number of elements in the itemList in a thread-safe fashion
 	// but with a timed wait if the underlying implementation allows it.
 	size_type size()
-	{
-		if( listLock->IsLocked() ){
+	{ bool wasLocked = listLock->IsLocked();
+		CRITSECTLOCK::Scope scope(listLock, 2500);
+		if( wasLocked ){
 			listLock->lockCounter += 1;
 		}
-		CRITSECTLOCK::Scope scope(listLock, 2500);
 		return itemList.size();
 	}
 
 	bool getFront(T &value)
 	{ bool ret = false;
-		if( listLock->IsLocked() ){
+	  bool wasLocked = listLock->IsLocked();
+		CRITSECTLOCK::Scope scope(listLock);
+		if( wasLocked ){
 			listLock->lockCounter += 1;
 		}
-		CRITSECTLOCK::Scope scope(listLock);
 		if( !itemList.empty() ){
 			value = itemList.front();
 			itemList.pop();
@@ -129,8 +130,9 @@ public:
 	ParallelFileProcessor(const int n=1, const int verboseLevel=0);
 	virtual ~ParallelFileProcessor()
 	{
-		if( verboseLevel > 1 ){
-			fprintf( stderr, "Queue lock conflicts: %lu\n", listLockConflicts() );
+		if( verboseLevel > 1 && (listLockConflicts() || ioLock->lockCounter) ){
+			fprintf( stderr, "Queue lock contention: %lux ; IO lock contention %lux\n",
+					 listLockConflicts(), ioLock->lockCounter );
 		}
 		delete ioLock;
 		if( allDoneEvent ){

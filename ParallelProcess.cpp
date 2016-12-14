@@ -16,17 +16,21 @@
 // ================================= FileEntry methods =================================
 
 FileEntry::FileEntry()
+	:fileName("")
+	,folderInfo(NULL)
+	,freeFolderInfo(false)
+	,compressedSize(0)
 {
-	folderInfo = NULL;
-	freeFolderInfo = false;
+	memset( &fileInfo, 0, sizeof(fileInfo) );
 }
 
 FileEntry::FileEntry( const char *name, const struct stat *finfo, FolderInfo *dinfo, const bool ownInfo )
+	:fileName(name)
+	,fileInfo(*finfo)
+	,folderInfo((ownInfo)? new FolderInfo(dinfo) : dinfo)
+	,freeFolderInfo(ownInfo)
+	,compressedSize(0)
 {
-	fileName = name;
-	fileInfo = *finfo;
-	folderInfo = (ownInfo)? new FolderInfo(dinfo) : dinfo;
-	freeFolderInfo = ownInfo;
 }
 
 FileEntry::FileEntry( const char *name, const struct stat *finfo, FolderInfo &dinfo )

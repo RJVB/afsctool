@@ -219,7 +219,7 @@ void MSEfreeAllShared()
 		  std::pair<void*,size_t> elem = *i;
 //			fprintf( stderr, "@@ MSEfreeShared(0x%p) of %lu remaining elements\n", elem.first, theMSEShMemList->size() );
 			if( elem.first == shMemCSE ){
-				i++;
+				++i;
 				if( i != theMSEShMemList->end() ){
 					elem = *i;
 					// MSEfreeShared() try to get another lock on shMemCSE, which
@@ -2017,7 +2017,7 @@ void MSEfreeAllShared()
 		  std::pair<void*,HANDLE> elem = *i;
 	//		fprintf( stderr, "MSEfreeShared(0x%p) of %lu remaining elements\n", elem.first, theMSEShMemList->size() );
 			if( elem.first == shMemCSE ){
-				i++;
+				i += 1;
 				if( i != theMSEShMemList->end() ){
 					elem = *i;
 					// MSEfreeShared() try to get another lock on shMemCSE, which

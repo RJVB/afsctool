@@ -92,7 +92,7 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
 //			ret >= 0 && fsInfo.f_type == 17
 //				&& S_ISREG(inFileInfo->st_mode)
 //				&& (inFileInfo->st_flags & UF_COMPRESSED) == 0 );
-	return (ret >= 0 && fsInfo.f_type == 17
+	return (ret >= 0 && (fsInfo.f_type == 17 || fsInfo.f_type == 23 || fsInfo.f_type == 29)
 		&& S_ISREG(inFileInfo->st_mode)
 		&& (inFileInfo->st_flags & UF_COMPRESSED) == 0);
 }

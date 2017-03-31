@@ -4,3 +4,5 @@ build
 *.log
 .*-swp
 testdir
+.kdev4
+*.kdev4

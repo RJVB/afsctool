@@ -87,12 +87,13 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
 {
 	struct statfs fsInfo;
 	int ret = statfs(inFile, &fsInfo);
-//	fprintf( stderr, "statfs=%d f_type=%u ISREG=%d UF_COMPRESSED=%d compressable=%d\n",
-//			ret, fsInfo.f_type, S_ISREG(inFileInfo->st_mode), (inFileInfo->st_flags & UF_COMPRESSED),
+//	fprintf( stderr, "statfs=%d f_type=%u \"%s\" ISREG=%d UF_COMPRESSED=%d compressable=%d\n",
+//			ret, fsInfo.f_type, fsInfo.f_fstypename, S_ISREG(inFileInfo->st_mode), (inFileInfo->st_flags & UF_COMPRESSED),
 //			ret >= 0 && fsInfo.f_type == 17
 //				&& S_ISREG(inFileInfo->st_mode)
 //				&& (inFileInfo->st_flags & UF_COMPRESSED) == 0 );
-	return (ret >= 0 && fsInfo.f_type == 17
+	return (ret >= 0
+		&& (!strncasecmp(fsInfo.f_fstypename, "hfs", 3) || !strncasecmp(fsInfo.f_fstypename, "apfs", 4))
 		&& S_ISREG(inFileInfo->st_mode)
 		&& (inFileInfo->st_flags & UF_COMPRESSED) == 0);
 }

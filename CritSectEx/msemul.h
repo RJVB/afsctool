@@ -702,7 +702,7 @@ static inline void _InterlockedSetTrue( volatile long *atomic )
 static inline void _InterlockedSetFalse( volatile long *atomic )
 {
 	while( *atomic ){
-		if( atomic > 0 ){
+		if( *atomic > 0 ){
 			if( _InterlockedDecrement(atomic) ){
 				YieldProcessor();
 			}

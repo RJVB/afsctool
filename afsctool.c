@@ -24,6 +24,7 @@
 	static ParallelFileProcessor *PP = NULL;
 	static bool exclusive_io = true;
 #endif
+#include "afsctool_fullversion.h"
 
 // use a hard-coded count so all arrays are always sized equally (and the compiler can warn better)
 const int sizeunits = 6;
@@ -1693,7 +1694,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 
 void printUsage()
 {
-	printf("afsctool 1.6.8 (build 1)\n"
+	printf("afsctool %s\n"
 		   "Report if file is HFS+ compressed:                        afsctool [-v] file[s]\n"
 		   "Report if folder contains HFS+ compressed files:          afsctool [-fvvi] [-t <ContentType/Extension>] folder[s]\n"
 		   "List HFS+ compressed files in folder:                     afsctool -l[fvv] folder\n"
@@ -1721,7 +1722,8 @@ void printUsage()
 		   "-jN compress (only compressable) files using <N> threads (compression is concurrent, disk IO is exclusive)\n"
 		   "-JN read, compress and write files (only compressable ones) using <N> threads (everything is concurrent except writing the compressed file)\n"
 #endif
-		   "-<level> Compression level to use when compressing (ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n");
+		   "-<level> Compression level to use when compressing (ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n"
+		  , AFSCTOOL_FULL_VERSION_STRING);
 }
 
 #ifndef SUPPORT_PARALLEL

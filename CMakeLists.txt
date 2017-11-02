@@ -11,7 +11,7 @@ include(GetGitRevisionDescription)
 
 find_package(ZLIB 1.2.8 REQUIRED)
 pkg_check_modules(SPARSEHASH libsparsehash)
-include_directories(${ZLIB_INCLUDE_DIRS} ${SPARSEHASH_INCLUDEDIR} ${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${ZLIB_INCLUDE_DIRS} ${SPARSEHASH_INCLUDEDIR} ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_SOURCE_DIR})
 link_directories(${SPARSEHASH_LIBRARY_DIRS})
 add_definitions(-DSUPPORT_PARALLEL)
 

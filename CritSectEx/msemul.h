@@ -344,7 +344,7 @@ typedef void*		LPVOID;
 			/*!
 				HANDLE destructor
 			 */
-			~MSHANDLE();
+			virtual ~MSHANDLE();
 			/*!
 				HANDLE string representation (cf. Python's __repr__)
 			 */

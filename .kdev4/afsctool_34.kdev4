@@ -5,6 +5,7 @@ BuildItems=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x00)
 Build Directory Count=2
 Current Build Directory Index=1
 ProjectRootRelative=./
+Temporary Build Directory Index=1
 
 [CMake][CMake Build Directory 0]
 Build Directory Path=file:///Users/bertin/cworks/MacOSX/afsctool_34/build
@@ -21,6 +22,7 @@ CMake Binary=/opt/local/bin/cmake
 Environment Profile=
 Extra Arguments=-DCMAKE_INSTALL_NAME_DIR=/opt/local/lib -DCMAKE_SYSTEM_PREFIX_PATH="/opt/local;/usr" -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_COLOR_MAKEFILE=ON -DCMAKE_FIND_FRAMEWORK=LAST -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_MODULE_PATH=/opt/local/share/cmake/Modules -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON -DCMAKE_INSTALL_RPATH="/opt/local/lib" -Wno-dev -DCMAKE_BUILD_TYPE=MacPorts -DCMAKE_STRIP:PATH=/bin/echo -DCMAKE_OSX_ARCHITECTURES="x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.9" -DCMAKE_OSX_SYSROOT="/"
 Install Directory=/opt/local
+Runtime=Host System
 
 [Cppcheck]
 checkInformation=true

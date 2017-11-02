@@ -263,20 +263,26 @@ static inline void _InterlockedSetFalse( volatile long *atomic )
 class MutexEx {
 	// Declare all variables volatile, so that the compiler won't
 	// try to optimise something important away.
+	struct membervars {
 #if defined(__windows__) || defined(__MUTEXEX_CAN_TIMEOUT__)
-	volatile HANDLE	m_hMutex;
-	volatile DWORD	m_bIsLocked;
+		volatile HANDLE	hMutex;
+		volatile DWORD		bIsLocked;
 #else
-	pthread_mutex_t	m_mMutex, *m_hMutex;
-	int				m_iMutexLockError;
-	volatile DWORD  m_bIsLocked;
+		pthread_mutex_t	mMutex, *hMutex;
+		int				iMutexLockError;
+		volatile DWORD		bIsLocked;
 #endif
 // #ifdef DEBUG
-	volatile long	m_hLockerThreadId;
-	volatile bool	m_bUnlocking;
+		volatile long	hLockerThreadId;
+		volatile bool	bUnlocking;
 // #endif
-	volatile bool	m_bTimedOut;
+		volatile bool	bTimedOut;
+public:
+		volatile unsigned long lockCounter;
+		size_t scopesUnlocked, scopesLocked;
+	} m;
 
+private:
 	// disable copy constructor and assignment
 	MutexEx(const MutexEx&);
 	void operator = (const MutexEx&);
@@ -284,26 +290,26 @@ class MutexEx {
 	__forceinline void PerfLock(DWORD dwTimeout)
 	{
 #ifdef DEBUG
-		if( m_bIsLocked ){
+		if( m.bIsLocked ){
 			fprintf( stderr, "Thread %lu attempting to lock mutex of thread %ld\n",
-				GetCurrentThreadId(), m_hLockerThreadId
+				GetCurrentThreadId(), m.hLockerThreadId
 			);
 		}
 #endif
 #if defined(__windows__) || defined(__MUTEXEX_CAN_TIMEOUT__)
-		switch( WaitForSingleObject( m_hMutex, dwTimeout ) ){
+		switch( WaitForSingleObject( m.hMutex, dwTimeout ) ){
 			case WAIT_ABANDONED:
 			case WAIT_FAILED:
 				cseAssertExInline(false, __FILE__, __LINE__);
 				break;
 			case WAIT_TIMEOUT:
-				m_bTimedOut = true;
+				m.bTimedOut = true;
 				break;
 			default:
 #	ifdef DEBUG
-				m_hLockerThreadId = (long) GetCurrentThreadId();
+				m.hLockerThreadId = (long) GetCurrentThreadId();
 #	endif
-				m_bIsLocked += 1;
+				m.bIsLocked += 1;
 				break;
 		}
 #elif defined(MUTEXEX_CAN_TIMEOUT)
@@ -318,24 +324,24 @@ class MutexEx {
 				}
 			}
 			errno = 0;
-			if( (m_iMutexLockError = pthread_mutex_timedlock( m_hMutex, &timeout )) ){
+			if( (m.iMutexLockError = pthread_mutex_timedlock( m.hMutex, &timeout )) ){
 				if( errno == ETIMEDOUT ){
-					m_bTimedOut = true;
+					m.bTimedOut = true;
 				}
 				else{
 					cseAssertExInline(false, __FILE__, __LINE__, "pthread_mutex_timedlock failed");
 				}
 			}
 #	ifdef DEBUG
-			m_hLockerThreadId = (long) GetCurrentThreadId();
+			m.hLockerThreadId = (long) GetCurrentThreadId();
 #	endif
-			m_bIsLocked += 1;
+			m.bIsLocked += 1;
 		}
 #else
-		// attempt to lock m_hMutex;
-		if( (m_iMutexLockError = pthread_mutex_lock(m_hMutex)) ){
+		// attempt to lock m.hMutex;
+		if( (m.iMutexLockError = pthread_mutex_lock(m.hMutex)) ){
 			if( errno == ETIMEDOUT ){
-				m_bTimedOut = true;
+				m.bTimedOut = true;
 			}
 			else{
 				cseAssertExInline(false, __FILE__, __LINE__, "pthread_mutex_lock failed");
@@ -343,37 +349,37 @@ class MutexEx {
 		}
 #	ifdef DEBUG
 		fprintf( stderr, "Mutex of thread %ld locked (recurs.lock=%ld) by thread %lu at t=%gs\n",
-			m_hLockerThreadId, m_bIsLocked+1, GetCurrentThreadId(), HRTime_tic()
+			m.hLockerThreadId, m.bIsLocked+1, GetCurrentThreadId(), HRTime_tic()
 		);
-		m_hLockerThreadId = (long) GetCurrentThreadId();
+		m.hLockerThreadId = (long) GetCurrentThreadId();
 #	endif
-		m_bIsLocked += 1;
+		m.bIsLocked += 1;
 #endif
 	}
 
 	__forceinline void PerfUnlock()
 	{
-//		if( m_bIsLocked ){
+//		if( m.bIsLocked ){
 #if defined(__windows__)
-		ReleaseMutex(m_hMutex);
+		ReleaseMutex(m.hMutex);
 #elif defined(__MUTEXEX_CAN_TIMEOUT__)
-		ReleaseSemaphore(m_hMutex, 1, NULL);
+		ReleaseSemaphore(m.hMutex, 1, NULL);
 #else
-		// release m_hMutex
-		m_iMutexLockError = pthread_mutex_unlock(m_hMutex);
+		// release m.hMutex
+		m.iMutexLockError = pthread_mutex_unlock(m.hMutex);
 #endif
-		if( m_bIsLocked > 0 ){
-			m_bIsLocked -= 1;
+		if( m.bIsLocked > 0 ){
+			m.bIsLocked -= 1;
 #ifdef DEBUG
-			if( !m_bUnlocking ){
+			if( !m.bUnlocking ){
 				fprintf( stderr, "Mutex of thread %ld unlocked (recurs.lock=%ld) by thread %lu at t=%gs\n",
-					m_hLockerThreadId, m_bIsLocked, GetCurrentThreadId(), HRTime_toc()
+					m.hLockerThreadId, m.bIsLocked, GetCurrentThreadId(), HRTime_toc()
 				);
 			}
 #endif
 		}
 #ifdef DEBUG
-		m_hLockerThreadId = -1;
+		m.hLockerThreadId = -1;
 #endif
 //		}
 	}
@@ -390,42 +396,41 @@ public:
 		MSEfreeShared(p);
 	}
 #endif //CRITSECTEX_ALLOWSHARED
-	size_t scopesUnlocked, scopesLocked;
 	// Constructor/Destructor
 	MutexEx(DWORD dwSpinMax=0)
 	{
-		memset(this, 0, sizeof(*this));
+		memset(&this->m, 0, sizeof(this->m));
 #if defined(__windows__)
-		m_hMutex = CreateMutex( NULL, FALSE, NULL );
-		cseAssertExInline( (m_hMutex!=NULL), __FILE__, __LINE__);
+		m.hMutex = CreateMutex( NULL, FALSE, NULL );
+		cseAssertExInline( (m.hMutex!=NULL), __FILE__, __LINE__);
 #elif defined(__MUTEXEX_CAN_TIMEOUT__)
-		m_hMutex = CreateSemaphore( NULL, 1, -1, NULL );
-		cseAssertExInline( (m_hMutex!=NULL), __FILE__, __LINE__);
+		m.hMutex = CreateSemaphore( NULL, 1, -1, NULL );
+		cseAssertExInline( (m.hMutex!=NULL), __FILE__, __LINE__);
 #else
 		// create a pthread_mutex_t
-		cseAssertExInline( (pthread_mutex_init(&m_mMutex, NULL) == 0), __FILE__, __LINE__);
-		m_hMutex = &m_mMutex;
-		scopesUnlocked = scopesLocked = 0;
+		cseAssertExInline( (pthread_mutex_init(&m.mMutex, NULL) == 0), __FILE__, __LINE__);
+		m.hMutex = &m.mMutex;
+		m.scopesUnlocked = m.scopesLocked = 0;
 #endif
 #ifdef DEBUG
-		m_hLockerThreadId = -1;
+		m.hLockerThreadId = -1;
 		lockCounter = 0;
 		init_HRTime();
 #endif
 	}
 
-	~MutexEx()
+	virtual ~MutexEx()
 	{
 #if defined(__windows__) || defined(__MUTEXEX_CAN_TIMEOUT__)
-		// should not be done when m_bIsLocked == TRUE ?!
-		CloseHandle(m_hMutex);
+		// should not be done when m.bIsLocked == TRUE ?!
+		CloseHandle(m.hMutex);
 #else
-		// delete the m_hMutex
-		m_iMutexLockError = pthread_mutex_destroy(m_hMutex);
-		m_hMutex = NULL;
-		if( scopesLocked || scopesUnlocked ){
+		// delete the m.hMutex
+		m.iMutexLockError = pthread_mutex_destroy(m.hMutex);
+		m.hMutex = NULL;
+		if( m.scopesLocked || m.scopesUnlocked ){
 			fprintf( stderr, "MutexEx: %lu scopes were destroyed still locked, %lu were already unlocked\n", 
-				scopesLocked, scopesUnlocked );
+				m.scopesLocked, m.scopesUnlocked );
 		}
 #endif
 	}
@@ -434,7 +439,7 @@ public:
 	__forceinline bool Lock(bool& bUnlockFlag, DWORD dwTimeout = INFINITE)
 	{
 		PerfLock(dwTimeout);
-		bUnlockFlag = !m_bTimedOut;
+		bUnlockFlag = !m.bTimedOut;
 		return true;
 	}
 
@@ -442,19 +447,19 @@ public:
 	{
 		if( bUnlockFlag ){
 #ifdef DEBUG
-			m_bUnlocking = true;
+			m.bUnlocking = true;
 #endif
 			PerfUnlock();
 #ifdef DEBUG
-			m_bUnlocking = false;
+			m.bUnlocking = false;
 #endif
 		}
 	}
 
-	__forceinline bool TimedOut() const { return m_bTimedOut; }
-	__forceinline bool IsLocked() const { return (bool) m_bIsLocked; }
+	__forceinline bool TimedOut() const { return m.bTimedOut; }
+	__forceinline bool IsLocked() const { return (bool) m.bIsLocked; }
 	__forceinline DWORD SpinMax()	const { return 0; }
-	operator bool () const { return (bool) m_bIsLocked; }
+	operator bool () const { return (bool) m.bIsLocked; }
 
 	// Some extra
 	void SetSpinMax(DWORD dwSpinMax)
@@ -541,10 +546,10 @@ public:
 		{
 			if( m_pCs && verbose ){
 				if( m_bLocked ){
-					m_pCs->scopesLocked += 1;
+					m_pCs->m.scopesLocked += 1;
 				}
 				else{
-					m_pCs->scopesUnlocked += 1;
+					m_pCs->m.scopesUnlocked += 1;
 				}
 			}
 			InternalUnlock();

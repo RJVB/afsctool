@@ -25,47 +25,82 @@
 	static bool exclusive_io = true;
 #endif
 
-const char *sizeunit10_short[] = {"KB", "MB", "GB", "TB", "PB", "EB"};
-const char *sizeunit10_long[] = {"kilobytes", "megabytes", "gigabytes", "terabytes", "petabytes", "exabytes"};
-const long long int sizeunit10[] = {1000, 1000 * 1000, 1000 * 1000 * 1000, (long long int) 1000 * 1000 * 1000 * 1000, (long long int) 1000 * 1000 * 1000 * 1000 * 1000, (long long int) 1000 * 1000 * 1000 * 1000 * 1000 * 1000};
-const char *sizeunit2_short[] = {"KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
-const char *sizeunit2_long[] = {"kibibytes", "mebibytes", "gibibytes", "tebibytes", "pebibytes", "exbibytes"};
-const long long int sizeunit2[] = {1024, 1024 * 1024, 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024 * 1024 * 1024};
+// use a hard-coded count so all arrays are always sized equally (and the compiler can warn better)
+const int sizeunits = 6;
+const char *sizeunit10_short[sizeunits] = {"KB", "MB", "GB", "TB", "PB", "EB"};
+const char *sizeunit10_long[sizeunits] = {"kilobytes", "megabytes", "gigabytes", "terabytes", "petabytes", "exabytes"};
+const long long int sizeunit10[sizeunits] = {1000, 1000 * 1000, 1000 * 1000 * 1000, (long long int) 1000 * 1000 * 1000 * 1000,
+	(long long int) 1000 * 1000 * 1000 * 1000 * 1000, (long long int) 1000 * 1000 * 1000 * 1000 * 1000 * 1000};
+const char *sizeunit2_short[sizeunits] = {"KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
+const char *sizeunit2_long[sizeunits] = {"kibibytes", "mebibytes", "gibibytes", "tebibytes", "pebibytes", "exbibytes"};
+const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024,
+	(long long int) 1024 * 1024 * 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024 * 1024 * 1024};
 
-char* getSizeStr(long long int size, long long int size_rounded)
+char* getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 {
-	static char sizeStr[90];
+	static char sizeStr[128];
+	static int len = sizeof(sizeStr)/sizeof(char);
 	int unit2, unit10;
 	
-	for (unit2 = 0; unit2 + 1 < sizeof(sizeunit2) && (size_rounded / sizeunit2[unit2 + 1]) > 0; unit2++);
-	for (unit10 = 0; unit10 + 1 < sizeof(sizeunit10) && (size_rounded / sizeunit10[unit10 + 1]) > 0; unit10++);
-	
-	sprintf(sizeStr, "%lld bytes / ", size);
+	for (unit2 = 0; unit2 + 1 < sizeunits && (size_rounded / sizeunit2[unit2 + 1]) > 0; unit2++);
+	for (unit10 = 0; unit10 + 1 < sizeunits && (size_rounded / sizeunit10[unit10 + 1]) > 0; unit10++);
 
-	switch (unit10)
-	{
-		case 0:
-			sprintf(sizeStr, "%s%0.0f %s (%s) / ", sizeStr, (double) size_rounded / sizeunit10[unit10], sizeunit10_short[unit10], sizeunit10_long[unit10]);
-			break;
-		case 1:
-			sprintf(sizeStr, "%s%.12g %s (%s) / ", sizeStr, (double) (((long long int) ((double) size_rounded / sizeunit10[unit10] * 100) + 5) / 10) / 10, sizeunit10_short[unit10], sizeunit10_long[unit10]);
-			break;
-		default:
-			sprintf(sizeStr, "%s%0.12g %s (%s) / ", sizeStr,   (double) (((long long int) ((double) size_rounded / sizeunit10[unit10] * 1000) + 5) / 10) / 100, sizeunit10_short[unit10], sizeunit10_long[unit10]);
-			break;
+	snprintf(sizeStr, len, "%lld bytes", size);
+
+#ifdef PRINT_SI_SIZES
+	int print_si_sizes = 1;
+#else
+	int print_si_sizes = likeFinder;
+#endif
+	if (print_si_sizes) {
+		// the Finder will happily print "0 bytes on disk" so here we don't bother
+		// determining if the human-readable value is > 0.
+		switch (unit10)
+		{
+			case 0:
+				snprintf(sizeStr, len, "%s / %0.0f %s (%s, base-10)", sizeStr,
+						 (double) size_rounded / sizeunit10[unit10], sizeunit10_short[unit10], sizeunit10_long[unit10]);
+				break;
+			case 1:
+				snprintf(sizeStr, len, "%s / %.12g %s (%s, base-10)", sizeStr,
+						 (double) (((long long int) ((double) size_rounded / sizeunit10[unit10] * 100) + 5) / 10) / 10,
+						 sizeunit10_short[unit10], sizeunit10_long[unit10]);
+				break;
+			default:
+				snprintf(sizeStr, len, "%s / %0.12g %s (%s, base-10)", sizeStr,
+						 (double) (((long long int) ((double) size_rounded / sizeunit10[unit10] * 1000) + 5) / 10) / 100,
+						 sizeunit10_short[unit10], sizeunit10_long[unit10]);
+				break;
+		}
 	}
-	
-	switch (unit2)
-	{
-		case 0:
-			sprintf(sizeStr, "%s%0.0f %s (%s)", sizeStr, (double) size_rounded / sizeunit2[unit2], sizeunit2_short[unit2], sizeunit2_long[unit2]);
-			break;
-		case 1:
-			sprintf(sizeStr, "%s%.12g %s (%s)", sizeStr, (double) (((long long int) ((double) size_rounded / sizeunit2[unit2] * 100) + 5) / 10) / 10, sizeunit2_short[unit2], sizeunit2_long[unit2]);
-			break;
-		default:
-			sprintf(sizeStr, "%s%0.12g %s (%s)", sizeStr,   (double) (((long long int) ((double) size_rounded / sizeunit2[unit2] * 1000) + 5) / 10) / 100, sizeunit2_short[unit2], sizeunit2_long[unit2]);
-			break;
+	if (!likeFinder) {
+		double humanReadable;
+		switch (unit2)
+		{
+			case 0:
+				// this should actually be the only case were we'd need
+				// to check if the human readable value is sensical...
+				humanReadable = (double) size_rounded / sizeunit2[unit2];
+				if( humanReadable >= 1 ) {
+					snprintf(sizeStr, len, "%s / %0.0f %s", sizeStr,
+						 humanReadable, sizeunit2_short[unit2]);
+				}
+				break;
+			case 1:
+				humanReadable = (double) (((long long int) ((double) size_rounded / sizeunit2[unit2] * 100) + 5) / 10) / 10;
+				if( humanReadable > 0 ) {
+					snprintf(sizeStr, len, "%s / %.12g %s", sizeStr,
+						 humanReadable, sizeunit2_short[unit2]);
+				}
+				break;
+			default:
+				humanReadable = (double) (((long long int) ((double) size_rounded / sizeunit2[unit2] * 1000) + 5) / 10) / 100;
+				if( humanReadable > 0 ) {
+					snprintf(sizeStr, len, "%s / %0.12g %s", sizeStr,
+						 humanReadable, sizeunit2_short[unit2]);
+				}
+				break;
+		}
 	}
 	
 	return sizeStr;
@@ -1232,13 +1267,15 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 			filesize += RFsize;
 			filesize_rounded += RFsize;
 			filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
-			printf("File size (data fork + resource fork; reported size by Mac OS X Finder): %s\n", getSizeStr(filesize, filesize_rounded));
+			printf("File size (data fork + resource fork; reported size by Mac OS X Finder): %s\n",
+				   getSizeStr(filesize, filesize_rounded, 1));
 		}
 		else
 		{
 			filesize_rounded = filesize = fileinfo->st_size;
 			filesize_rounded += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
-			printf("File data fork size (reported size by Mac OS X Finder): %s\n", getSizeStr(filesize, filesize_rounded));
+			printf("File data fork size (reported size by Mac OS X Finder): %s\n",
+				   getSizeStr(filesize, filesize_rounded, 1));
 		}
 		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
@@ -1248,7 +1285,8 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		filesize += RFsize;
 		filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
 		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
-		printf("Approximate total file size (data fork + resource fork + EA + EA overhead + file overhead): %s\n", getSizeStr(filesize, filesize));
+		printf("Approximate total file size (data fork + resource fork + EA + EA overhead + file overhead): %s\n",
+			   getSizeStr(filesize, filesize, 0));
 	}
 	else
 	{
@@ -1260,15 +1298,17 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 			free(filetype);
 		}
 		filesize = fileinfo->st_size;
-		printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n", getSizeStr(filesize, filesize));
+		printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
+			   getSizeStr(filesize, filesize, 1));
 		filesize_rounded = filesize = RFsize;
 		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
-		printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n", getSizeStr(filesize, filesize_rounded));
+		printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
+			   getSizeStr(filesize, filesize_rounded, 1));
 		filesize_rounded = filesize = RFsize;
 		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
 		filesize += compattrsize;
 		filesize_rounded += compattrsize;
-		printf("File size (compressed data fork): %s\n", getSizeStr(filesize, filesize_rounded));
+		printf("File size (compressed data fork): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 		printf("Compression savings: %0.1f%%\n", (1.0 - (((double) RFsize + compattrsize) / fileinfo->st_size)) * 100.0);
 		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
@@ -1276,7 +1316,8 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		filesize = RFsize;
 		filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
 		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
-		printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n", getSizeStr(filesize, filesize));
+		printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
+			   getSizeStr(filesize, filesize, 0));
 	}
 }
 
@@ -1393,15 +1434,17 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				if (filetype != NULL)
 					printf("File content type: %s\n", filetype);
 				filesize = fileinfo->st_size;
-				printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n", getSizeStr(filesize, filesize));
+				printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
+					   getSizeStr(filesize, filesize, 1));
 				filesize_rounded = filesize = RFsize;
 				filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
-				printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n", getSizeStr(filesize, filesize_rounded));
+				printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
+					   getSizeStr(filesize, filesize_rounded, 1));
 				filesize_rounded = filesize = RFsize;
 				filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
 				filesize += compattrsize;
 				filesize_rounded += compattrsize;
-				printf("File size (compressed data fork): %s\n", getSizeStr(filesize, filesize_rounded));
+				printf("File size (compressed data fork): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 				printf("Compression savings: %0.1f%%\n", (1.0 - (((double) RFsize + compattrsize) / fileinfo->st_size)) * 100.0);
 				printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 				printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
@@ -1409,7 +1452,8 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				filesize = RFsize;
 				filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
 				filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
-				printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n", getSizeStr(filesize, filesize));
+				printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
+					   getSizeStr(filesize, filesize, 0));
 			}
 			else if (!folderinfo->compress_files)
 			{
@@ -1465,21 +1509,25 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 	foldersize = folderinfo->uncompressed_size;
 	foldersize_rounded = folderinfo->uncompressed_size_rounded;
 	if ((folderinfo->num_hard_link_files == 0 && folderinfo->num_hard_link_folders == 0) || !hardLinkCheck)
-		printf("Folder size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n", getSizeStr(foldersize, foldersize_rounded));
+		printf("Folder size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
+			   getSizeStr(foldersize, foldersize_rounded, 1));
 	else
-		printf("Folder size (uncompressed): %s\n", getSizeStr(foldersize, foldersize_rounded));
+		printf("Folder size (uncompressed): %s\n",
+			   getSizeStr(foldersize, foldersize_rounded, 0));
 	foldersize = folderinfo->compressed_size;
 	foldersize_rounded = folderinfo->compressed_size_rounded;
 	if ((folderinfo->num_hard_link_files == 0 && folderinfo->num_hard_link_folders == 0) || !hardLinkCheck)
-		printf("Folder size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n", getSizeStr(foldersize, foldersize_rounded));
+		printf("Folder size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
+			   getSizeStr(foldersize, foldersize_rounded, 1));
 	else
-		printf("Folder size (compressed - decmpfs xattr): %s\n", getSizeStr(foldersize, foldersize_rounded));
+		printf("Folder size (compressed - decmpfs xattr): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
 	foldersize = folderinfo->compressed_size + folderinfo->compattr_size;
 	foldersize_rounded = folderinfo->compressed_size_rounded + folderinfo->compattr_size;
-	printf("Folder size (compressed): %s\n", getSizeStr(foldersize, foldersize_rounded));
+	printf("Folder size (compressed): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
 	printf("Compression savings: %0.1f%%\n", (1.0 - ((float) (folderinfo->compressed_size + folderinfo->compattr_size) / folderinfo->uncompressed_size)) * 100.0);
 	foldersize = folderinfo->total_size;
-	printf("Approximate total folder size (files + file overhead + folder overhead): %s\n", getSizeStr(foldersize, foldersize));
+	printf("Approximate total folder size (files + file overhead + folder overhead): %s\n",
+		   getSizeStr(foldersize, foldersize, 0));
 }
 
 void process_folder(FTS *currfolder, struct folder_info *folderinfo)
@@ -2395,21 +2443,25 @@ next_arg:;
 							filesize = folderinfo.filetypes[i].uncompressed_size;
 							filesize_rounded = folderinfo.filetypes[i].uncompressed_size_rounded;
 							if (folderinfo.filetypes[i].num_hard_link_files == 0 || !hardLinkCheck)
-								printf("File(s) size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n", getSizeStr(filesize, filesize_rounded));
+								printf("File(s) size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
+									   getSizeStr(filesize, filesize_rounded, 1));
 							else
-								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded));
+								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							filesize = folderinfo.filetypes[i].compressed_size;
 							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded;
 							if (folderinfo.filetypes[i].num_hard_link_files == 0 || !hardLinkCheck)
-								printf("File(s) size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n", getSizeStr(filesize, filesize_rounded));
+								printf("File(s) size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
+									   getSizeStr(filesize, filesize_rounded, 1));
 							else
-								printf("File(s) size (compressed - decmpfs xattr): %s\n", getSizeStr(filesize, filesize_rounded));
+								printf("File(s) size (compressed - decmpfs xattr): %s\n",
+									   getSizeStr(filesize, filesize_rounded, 0));
 							filesize = folderinfo.filetypes[i].compressed_size + folderinfo.filetypes[i].compattr_size;
 							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded + folderinfo.filetypes[i].compattr_size;
-							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded));
+							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							printf("Compression savings: %0.1f%%\n", (1.0 - ((float) (folderinfo.filetypes[i].compressed_size + folderinfo.filetypes[i].compattr_size) / folderinfo.filetypes[i].uncompressed_size)) * 100.0);
 							filesize = folderinfo.filetypes[i].total_size;
-							printf("Approximate total file(s) size (files + file overhead): %s\n", getSizeStr(filesize, filesize));
+							printf("Approximate total file(s) size (files + file overhead): %s\n",
+								   getSizeStr(filesize, filesize, 0));
 						}
 						free(folderinfo.filetypes[i].filetype);
 					}
@@ -2437,21 +2489,25 @@ next_arg:;
 							filesize = alltypesinfo.uncompressed_size;
 							filesize_rounded = alltypesinfo.uncompressed_size_rounded;
 							if (alltypesinfo.num_hard_link_files == 0 || !hardLinkCheck)
-								printf("File(s) size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n", getSizeStr(filesize, filesize_rounded));
+								printf("File(s) size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
+									   getSizeStr(filesize, filesize_rounded, 1));
 							else
-								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded));
+								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							filesize = alltypesinfo.compressed_size;
 							filesize_rounded = alltypesinfo.compressed_size_rounded;
 							if (alltypesinfo.num_hard_link_files == 0 || !hardLinkCheck)
-								printf("File(s) size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n", getSizeStr(filesize, filesize_rounded));
+								printf("File(s) size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
+									   getSizeStr(filesize, filesize_rounded, 1));
 							else
-								printf("File(s) size (compressed - decmpfs xattr): %s\n", getSizeStr(filesize, filesize_rounded));
+								printf("File(s) size (compressed - decmpfs xattr): %s\n",
+									   getSizeStr(filesize, filesize_rounded, 0));
 							filesize = alltypesinfo.compressed_size + alltypesinfo.compattr_size;
 							filesize_rounded = alltypesinfo.compressed_size_rounded + alltypesinfo.compattr_size;
-							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded));
+							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							printf("Compression savings: %0.1f%%\n", (1.0 - ((float) (alltypesinfo.compressed_size + alltypesinfo.compattr_size) / alltypesinfo.uncompressed_size)) * 100.0);
 							filesize = alltypesinfo.total_size;
-							printf("Approximate total file(s) size (files + file overhead): %s\n", getSizeStr(filesize, filesize));
+							printf("Approximate total file(s) size (files + file overhead): %s\n",
+								   getSizeStr(filesize, filesize, 0));
 						}
 					}
 					printf("\n");

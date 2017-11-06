@@ -1,8 +1,7 @@
 /*
  * @file ParallelProcess.h
  * Copyright 2015 René J.V. Bertin
- * This code is made available under the CPOL License
- * http://www.codeproject.com/info/cpol10.aspx
+ *  This code is made available under No License At All
  */
 #ifndef _PARALLELPROCESS_H
 

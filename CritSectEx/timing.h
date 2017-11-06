@@ -3,6 +3,7 @@
  *
  *  (C) René J.V. Bertin on 20080926.
  *
+ *  This code is made available under No License At All
  */
 
 #ifndef TIMINGext

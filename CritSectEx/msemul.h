@@ -5,8 +5,7 @@
  *
  *  Created by René J.V. Bertin on 20111204.
  *  Copyright 2011 RJVB. All rights reserved.
- *  This code is made available under the CPOL License
- *  http://www.codeproject.com/info/cpol10.aspx
+ *  This code is made available under No License At All
  */
 
 #ifdef SWIG

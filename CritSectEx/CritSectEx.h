@@ -1,13 +1,13 @@
 // kate: auto-insert-doxygen true; backspace-indents true; indent-width 5; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 5;
 /*!
 	@file CritSectEx.h
-	A fast CriticalSection like class with timeout (taken from and) inspired by
+	A fast CriticalSection like class with timeout (reimplemented from and) inspired by
 	@n
 	http://www.codeproject.com/KB/threads/CritSectEx.aspx
-	released under the CPOL license (http://www.codeproject.com/info/cpol10.aspx)
+	originally released under the CPOL license (http://www.codeproject.com/info/cpol10.aspx)
+	for MS Windows only; extended and ported to Mac OS X & linux by RJVB
 	@n
-	extended and ported to Mac OS X & linux by RJVB
-	This file includes only RJVB's MutexEx version.
+	This file includes only RJVB's MutexEx version which I provide under No License At All.
  */
 
 #ifdef SWIG
@@ -19,7 +19,6 @@
 #	endif
 #	include "CritSectEx.h"
 %}
-%include <windows.i>
 %feature("autodoc","3");
 
 %init %{
@@ -32,15 +31,7 @@
 
 #pragma once
 
-#if defined(WIN32) || defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__) || defined(SWIGWIN)
-#	if !defined(WINVER) || WINVER < 0x0501
-#		define WINVER 0x0501
-#	endif
-#	if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0501
-#		define _WIN32_WINNT 0x0501
-#	endif
-#	define	__windows__
-#endif
+// snip MSWin code
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,15 +77,7 @@
 #endif
 
 #if defined(DEBUG)
-#	if defined(_MSC_VER)
-#		ifndef ASSERT
-//#			define ASSERT(x) do { if (!(x)) InlDebugBreak(); } while (false)
-#			define ASSERT(x) cseAssertExInline((void*)(x),__FILE__,__LINE__,"ASSERT")
-#		endif // ASSERT
-#		ifndef VERIFY
-#			define VERIFY(x) ASSERT(x)
-#		endif
-#	else
+// snip MSWin code
 #		include <assert.h>
 #		ifndef ASSERT
 #			define ASSERT(x) assert(x)
@@ -102,7 +85,6 @@
 #		ifndef VERIFY
 #			define VERIFY(x) ASSERT(x)
 #		endif
-#	endif
 #else // DEBUG
 #	ifndef ASSERT
 #		define ASSERT(x)
@@ -132,36 +114,12 @@
 #endif
 	{
 		if( !(expected) ){
-#if defined(__windows__)
-		  ULONG_PTR args[2];
-		  int confirmation;
-		  char msgBuf[1024];
-#endif
+// snip MSWin code
 		  const char *larg = (arg)? arg : "";;
 			if( !title ){
 				title = "CritSectEx malfunction";
 			}
-#if defined(__windows__)
-			// error handling. Do whatever is necessary in your implementation.
-#	ifdef _MSC_VER
-			_snprintf_s( msgBuf, sizeof(msgBuf), sizeof(msgBuf),
-					"assertion failure (cseAssertEx called from '%s' line %d%s%s) - continue execution?",
-					fileName, linenr, (arg)? " with arg=" : "", larg
-			);
-#	else
-			snprintf( msgBuf, sizeof(msgBuf),
-					"assertion failure (cseAssertEx called from '%s' line %d%s%s) - continue execution?",
-					fileName, linenr, (arg)? " with arg=" : "", larg
-			);
-#	endif
-			msgBuf[sizeof(msgBuf)-1] = '\0';
-			confirmation = MessageBox( NULL, msgBuf, title, MB_APPLMODAL|MB_ICONQUESTION|MB_YESNO );
-			if( confirmation != IDOK && confirmation != IDYES ){
-				args[0] = GetLastError();
-				args[1] = (ULONG_PTR) linenr;
-				RaiseException( EXCEPTION_FAILED_CRITSECTEX_SIGNAL, 0 /*EXCEPTION_NONCONTINUABLE_EXCEPTION*/, 2, args );
-			}
-#else
+// snip MSWin code
 		  char msgBuf[1024];
 			// error handling. Do whatever is necessary in your implementation.
 			snprintf( msgBuf, sizeof(msgBuf),
@@ -173,7 +131,6 @@
 #	ifdef __cplusplus
 			throw cseAssertFailure(msgBuf);
 #	endif
-#endif
 		}
 	}
 #ifdef __cplusplus
@@ -360,9 +317,8 @@ private:
 	__forceinline void PerfUnlock()
 	{
 //		if( m.bIsLocked ){
-#if defined(__windows__)
-		ReleaseMutex(m.hMutex);
-#elif defined(__MUTEXEX_CAN_TIMEOUT__)
+// snip MSWin code
+#if defined(__MUTEXEX_CAN_TIMEOUT__)
 		ReleaseSemaphore(m.hMutex, 1, NULL);
 #else
 		// release m.hMutex
@@ -400,10 +356,8 @@ public:
 	MutexEx(DWORD dwSpinMax=0)
 	{
 		memset(&this->m, 0, sizeof(this->m));
-#if defined(__windows__)
-		m.hMutex = CreateMutex( NULL, FALSE, NULL );
-		cseAssertExInline( (m.hMutex!=NULL), __FILE__, __LINE__);
-#elif defined(__MUTEXEX_CAN_TIMEOUT__)
+// snip MSWin code
+#if defined(__MUTEXEX_CAN_TIMEOUT__)
 		m.hMutex = CreateSemaphore( NULL, 1, -1, NULL );
 		cseAssertExInline( (m.hMutex!=NULL), __FILE__, __LINE__);
 #else

@@ -8,6 +8,7 @@
  *  Copyright 2011 IFSTTAR / LEPSIS / R.J.V. Bertin. All rights reserved.
  *  Copyright 2012-20xx R.J.V. Bertin. 
  *
+ *  This code is made available under No License At All
  */
 
 #if !defined(_MSC_VER) && !defined(__MINGW32__) && !defined(__MINGW64__) && !defined(WIN32) && !defined(_WIN64)

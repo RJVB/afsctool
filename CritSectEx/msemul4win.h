@@ -6,6 +6,7 @@
  *  Created by René J.V. Bertin on 20120630.
  *  Copyright 2012 RJVB. All rights reserved.
  *
+ *  This code is made available under No License At All
  */
 
 #ifndef _MSEMUL_H

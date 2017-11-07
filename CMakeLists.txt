@@ -3,6 +3,7 @@ project(afsctool VERSION 1.6.8.5)
 set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
 
 set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/modules)
+set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH ON)
 
 include(FindPkgConfig)
 include(FeatureSummary)

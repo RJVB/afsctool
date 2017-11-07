@@ -26,6 +26,8 @@
 #endif
 #include "afsctool_fullversion.h"
 
+#define xfree(x)	if((x)){free((x)); (x)=NULL;}
+
 // use a hard-coded count so all arrays are always sized equally (and the compiler can warn better)
 const int sizeunits = 6;
 const char *sizeunit10_short[sizeunits] = {"KB", "MB", "GB", "TB", "PB", "EB"};
@@ -107,7 +109,11 @@ char* getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 	return sizeStr;
 }
 
-#define xfree(x)	if((x)){free((x)); (x)=NULL;}
+long long int roundToBlkSize(long long int size, struct stat *fileinfo)
+{
+	long long int remainder = size % fileinfo->st_blksize;
+	return (remainder != 0) ? fileinfo->st_blksize - (remainder) : size;
+}
 
 static bool quitRequested = FALSE;
 
@@ -583,7 +589,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 	unsigned int compblksize = 0x10000, numBlocks, currBlock;
 	long long int filesize;
 	unsigned long int uncmpedsize;
-	void *inBuf = NULL, *outBuf, *indecmpfsBuf = NULL, *blockStart;
+	void *inBuf = NULL, *outBuf = NULL, *indecmpfsBuf = NULL, *blockStart;
 	char *xattrnames, *curr_attr;
 	ssize_t xattrnamesize, indecmpfsLen = 0, inRFLen = 0, getxattrret, RFpos = 0;
 	struct timeval times[2];
@@ -928,11 +934,9 @@ bail:
 	if (inFileInfo->st_mode != orig_mode) {
 		chmod(inFile, orig_mode);
 	}
-	if (inBuf != NULL)
-		free(inBuf);
-	if (indecmpfsBuf != NULL)
-		free(indecmpfsBuf);
-	free(outBuf);
+	xfree(inBuf);
+	xfree(indecmpfsBuf);
+	xfree(outBuf);
 }
 
 bool checkForHardLink(const char *filepath, const struct stat *fileInfo, const struct folder_info *folderinfo)
@@ -1741,7 +1745,7 @@ int afsctool (int argc, const char * argv[])
 	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd, *fileextension, *filetype = NULL;
 	int printVerbose = 0, compressionlevel = 5;
 	double minSavings = 0.0;
-	long long int foldersize, foldersize_rounded, filesize, filesize_rounded, maxSize = 0;
+	long long int filesize, filesize_rounded, maxSize = 0;
 	bool printDir = FALSE, decomp = FALSE, createfile = FALSE, extractfile = FALSE, applycomp = FALSE,
 		fileCheck = TRUE, argIsFile, hardLinkCheck = FALSE, dstIsFile, free_src = FALSE, free_dst = FALSE,
 		invert_filetypelist = FALSE, allowLargeBlocks = FALSE, filetype_found, backupFile = FALSE;

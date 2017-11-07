@@ -4,8 +4,8 @@ BuildItems=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x00)
 [CMake]
 Build Directory Count=2
 Current Build Directory Index=1
+Current Build Directory Index-Host System=1
 ProjectRootRelative=./
-Temporary Build Directory Index=1
 
 [CMake][CMake Build Directory 0]
 Build Directory Path=file:///Users/bertin/cworks/MacOSX/afsctool_34/build
@@ -18,9 +18,10 @@ Install Directory=/opt/local
 [CMake][CMake Build Directory 1]
 Build Directory Path=/opt/local/var/macports/build/_Volumes_Debian_MP9_site-ports_sysutils_afsctool/afsctool/work/build
 Build Type=MacPorts
-CMake Binary=/opt/local/bin/cmake
+CMake Binary=/opt/local/bin/cmake2port_noserver
+CMake Executable=/opt/local/bin/cmake2port_noserver
 Environment Profile=
-Extra Arguments=-DCMAKE_INSTALL_NAME_DIR=/opt/local/lib -DCMAKE_SYSTEM_PREFIX_PATH="/opt/local;/usr" -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_COLOR_MAKEFILE=ON -DCMAKE_FIND_FRAMEWORK=LAST -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_MODULE_PATH=/opt/local/share/cmake/Modules -DCMAKE_BUILD_WITH_INSTALL_RPATH:BOOL=ON -DCMAKE_INSTALL_RPATH="/opt/local/lib" -Wno-dev -DCMAKE_BUILD_TYPE=MacPorts -DCMAKE_STRIP:PATH=/bin/echo -DCMAKE_OSX_ARCHITECTURES="x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.9" -DCMAKE_OSX_SYSROOT="/"
+Extra Arguments=-nvok --port afsctool --configure.optflags "-O3 -march=native -mdynamic-no-pic -g" configure.compiler=macports-clang-4.0
 Install Directory=/opt/local
 Runtime=Host System
 

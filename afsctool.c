@@ -120,12 +120,15 @@ long long int roundToBlkSize(long long int size, struct stat *fileinfo)
 	if (size <= 0) {
 		return size;
 	} else if (size < fileinfo->st_blksize) {
-// 		fprintf( stderr, "size=%lld -> blksize %d\n", size, fileinfo->st_blksize);
+// 		fprintf( stderr, "size=%lld -> blksize %d\n", size, fileinfo->st_blksize );
 		return fileinfo->st_blksize;
 	} else {
 		// round up to the next multiple of st_blksize:
 		long long int remainder = size % fileinfo->st_blksize;
-// 		fprintf( stderr, "size=%lld -> multiple of blksize %d: %lld\n", size, fileinfo->st_blksize, (remainder != 0) ? size + (fileinfo->st_blksize - remainder) : size);
+// 		fprintf( stderr, "size=%lld -> multiple of blksize %d: %lld (%g ; %d)\n", size,
+// 				 fileinfo->st_blksize, (remainder != 0) ? size + (fileinfo->st_blksize - remainder) : size,
+// 				 (double) ((remainder != 0) ? size + (fileinfo->st_blksize - remainder) : size) / fileinfo->st_blocks,
+// 				 fileinfo->st_blksize);
 		return (remainder != 0) ? size + (fileinfo->st_blksize - remainder) : size;
 	}
 }

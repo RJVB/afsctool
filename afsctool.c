@@ -134,7 +134,7 @@ static void signal_handler(int sig)
 #endif
 }
 
-bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
+bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, bool *isAPFS)
 {
 	struct statfs fsInfo;
 	int ret = statfs(inFile, &fsInfo);
@@ -143,8 +143,12 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
 //			ret >= 0 && fsInfo.f_type == 17
 //				&& S_ISREG(inFileInfo->st_mode)
 //				&& (inFileInfo->st_flags & UF_COMPRESSED) == 0 );
+	bool _isAPFS = !strncasecmp(fsInfo.f_fstypename, "apfs", 4);
+	if (isAPFS) {
+		*isAPFS = _isAPFS;
+	}
 	return (ret >= 0
-		&& (!strncasecmp(fsInfo.f_fstypename, "hfs", 3) || !strncasecmp(fsInfo.f_fstypename, "apfs", 4))
+		&& (!strncasecmp(fsInfo.f_fstypename, "hfs", 3) || _isAPFS)
 		&& S_ISREG(inFileInfo->st_mode)
 		&& (inFileInfo->st_flags & UF_COMPRESSED) == 0);
 }
@@ -203,7 +207,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	times[1].tv_sec = inFileInfo->st_mtimespec.tv_sec;
 	times[1].tv_usec = inFileInfo->st_mtimespec.tv_nsec / 1000;
 	
-	if (!fileIsCompressable(inFile, inFileInfo)){
+	if (!fileIsCompressable(inFile, inFileInfo, &folderinfo->onAPFS)){
 		return;
 	}
 	if (filesize > maxSize && maxSize != 0){
@@ -1208,7 +1212,7 @@ struct filetype_info* getFileTypeInfo(const char *filepath, const char *filetype
 	return &folderinfo->filetypes[left_pos];
 }
 
-void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp)
+void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp, bool onAPFS)
 {
 	char *xattrnames, *curr_attr, *filetype;
 	ssize_t xattrnamesize, xattrssize = 0, xattrsize, RFsize = 0, compattrsize = 0;
@@ -1292,12 +1296,16 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		}
 		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
-		printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
 		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
 		filesize = roundToBlkSize(filesize + RFsize, fileinfo);
-		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
-		printf("Approximate total file size (data fork + resource fork + EA + EA overhead + file overhead): %s\n",
+		filesize += compattrsize + xattrssize;
+		if (!onAPFS) {
+			printf("Approximate overhead of extended HFS+ attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
+			filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
+		}
+		printf("Approximate total file size (data fork + resource fork + EA + EA overhead + file overhead): %s\n", 
 			   getSizeStr(filesize, filesize, 0));
+
 	}
 	else
 	{
@@ -1323,9 +1331,12 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		printf("Compression savings: %0.1f%%\n", (1.0 - (((double) RFsize + compattrsize) / fileinfo->st_size)) * 100.0);
 		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
-		printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
 		filesize = roundToBlkSize(RFsize, fileinfo);
-		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
+		filesize += compattrsize + xattrssize;
+		if (!onAPFS) {
+			printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
+			filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
+		}
 		printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
 			   getSizeStr(filesize, filesize, 0));
 	}
@@ -1426,7 +1437,10 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 		}
 		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
 		filesize = roundToBlkSize(filesize + RFsize, fileinfo);
-		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
+		filesize += compattrsize + xattrssize;
+		if (!folderinfo->onAPFS) {
+			filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
+		}
 		folderinfo->total_size += filesize;
 		if (filetypeinfo != NULL && filetype_found)
 			filetypeinfo->total_size += filesize;
@@ -1455,9 +1469,12 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				printf("Compression savings: %0.1f%%\n", (1.0 - (((double) RFsize + compattrsize) / fileinfo->st_size)) * 100.0);
 				printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 				printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
-				printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
 				filesize = roundToBlkSize(RFsize, fileinfo);
-				filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
+				filesize += compattrsize + xattrssize;
+				if (!folderinfo->onAPFS) {
+					printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
+					filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
+				}
 				printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
 					   getSizeStr(filesize, filesize, 0));
 			}
@@ -1488,7 +1505,10 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 			filetypeinfo->compattr_size += compattrsize;
 		}
 		filesize = roundToBlkSize(RFsize, fileinfo);
-		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
+		filesize += compattrsize + xattrssize;
+		if (!folderinfo->onAPFS) {
+			filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
+		}
 		folderinfo->total_size += filesize;
 		folderinfo->num_compressed++;
 		if (filetypeinfo != NULL && filetype_found)
@@ -1598,7 +1618,10 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 							free(xattrnames);
 						}
 						folderinfo->num_folders++;
-						folderinfo->total_size += xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFolder);
+						folderinfo->total_size += xattrssize;
+						if (!folderinfo->onAPFS) {
+							folderinfo->total_size += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFolder);
+						}
 					}
 					else
 					{
@@ -1606,7 +1629,9 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 						fts_set(currfolder, currfile, FTS_SKIP);
 						
 						folderinfo->num_folders++;
-						folderinfo->total_size += sizeof(HFSPlusCatalogFolder);
+						if (!folderinfo->onAPFS) {
+							folderinfo->total_size += sizeof(HFSPlusCatalogFolder);
+						}
 					}
 				}
 			}
@@ -1653,7 +1678,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 #ifdef SUPPORT_PARALLEL
 							if (PP)
 							{
-								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp))
+								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp, &folderinfo->onAPFS))
 									addFileToParallelProcessor( PP, currfile->fts_path, currfile->fts_statp, folderinfo, false );
 								else
 									process_file(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
@@ -1677,13 +1702,17 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 					folderinfo->num_hard_link_files++;
 					
 					folderinfo->num_files++;
-					folderinfo->total_size += sizeof(HFSPlusCatalogFile);
+					if (!folderinfo->onAPFS) {
+						folderinfo->total_size += sizeof(HFSPlusCatalogFile);
+					}
 					if (filetype_found && (filetypeinfo = getFileTypeInfo(currfile->fts_path, filetype, folderinfo)) != NULL)
 					{
 						filetypeinfo->num_hard_link_files++;
 						
 						filetypeinfo->num_files++;
-						filetypeinfo->total_size += sizeof(HFSPlusCatalogFile);
+						if (!folderinfo->onAPFS) {
+							filetypeinfo->total_size += sizeof(HFSPlusCatalogFile);
+						}
 					}
 				}
 				if (filetype != NULL) free(filetype);
@@ -2072,7 +2101,7 @@ next_arg:;
 #ifdef SUPPORT_PARALLEL
 			if (PP)
 			{
-				if (fileIsCompressable(fullpath, &fileinfo))
+				if (fileIsCompressable(fullpath, &fileinfo, &fi.onAPFS))
 				{
 					addFileToParallelProcessor( PP, fullpath, &fileinfo, &fi, true );
 				}
@@ -2351,7 +2380,9 @@ next_arg:;
 		}
 		else if (argIsFile && printVerbose > 0)
 		{
-			printFileInfo(fullpath, &fileinfo, applycomp);
+			bool onAPFS;
+			fileIsCompressable(fullpath, &fileinfo, &onAPFS);
+			printFileInfo(fullpath, &fileinfo, applycomp, onAPFS);
 		}
 		else if (!argIsFile)
 		{

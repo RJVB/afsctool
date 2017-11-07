@@ -111,8 +111,17 @@ char* getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 
 long long int roundToBlkSize(long long int size, struct stat *fileinfo)
 {
-	long long int remainder = size % fileinfo->st_blksize;
-	return (remainder != 0) ? fileinfo->st_blksize - (remainder) : size;
+	if (size <= 0) {
+		return size;
+	} else if (size < fileinfo->st_blksize) {
+// 		fprintf( stderr, "size=%lld -> blksize %d\n", size, fileinfo->st_blksize);
+		return fileinfo->st_blksize;
+	} else {
+		// round up to the next multiple of st_blksize:
+		long long int remainder = size % fileinfo->st_blksize;
+// 		fprintf( stderr, "size=%lld -> multiple of blksize %d: %lld\n", size, fileinfo->st_blksize, (remainder != 0) ? size + (fileinfo->st_blksize - remainder) : size);
+		return (remainder != 0) ? size + (fileinfo->st_blksize - remainder) : size;
+	}
 }
 
 static bool quitRequested = FALSE;
@@ -1267,28 +1276,25 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		{
 			printf("File data fork size: %lld bytes\n", fileinfo->st_size);
 			printf("File resource fork size: %ld bytes\n", RFsize);
-			filesize_rounded = filesize = fileinfo->st_size;
-			filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+			filesize = fileinfo->st_size;
+			filesize_rounded = roundToBlkSize(filesize, fileinfo);
 			filesize += RFsize;
-			filesize_rounded += RFsize;
-			filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+			filesize_rounded = roundToBlkSize(filesize_rounded + RFsize, fileinfo);
 			printf("File size (data fork + resource fork; reported size by Mac OS X Finder): %s\n",
 				   getSizeStr(filesize, filesize_rounded, 1));
 		}
 		else
 		{
-			filesize_rounded = filesize = fileinfo->st_size;
-			filesize_rounded += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
+			filesize = fileinfo->st_size;
+			filesize_rounded = roundToBlkSize(filesize, fileinfo);
 			printf("File data fork size (reported size by Mac OS X Finder): %s\n",
 				   getSizeStr(filesize, filesize_rounded, 1));
 		}
 		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
 		printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
-		filesize = fileinfo->st_size;
-		filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
-		filesize += RFsize;
-		filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
+		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
+		filesize = roundToBlkSize(filesize + RFsize, fileinfo);
 		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
 		printf("Approximate total file size (data fork + resource fork + EA + EA overhead + file overhead): %s\n",
 			   getSizeStr(filesize, filesize, 0));
@@ -1305,12 +1311,12 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		filesize = fileinfo->st_size;
 		printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
 			   getSizeStr(filesize, filesize, 1));
-		filesize_rounded = filesize = RFsize;
-		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+		filesize = RFsize;
+		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
 			   getSizeStr(filesize, filesize_rounded, 1));
-		filesize_rounded = filesize = RFsize;
-		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+		filesize = RFsize;
+		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		filesize += compattrsize;
 		filesize_rounded += compattrsize;
 		printf("File size (compressed data fork): %s\n", getSizeStr(filesize, filesize_rounded, 0));
@@ -1318,8 +1324,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
 		printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
-		filesize = RFsize;
-		filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
+		filesize = roundToBlkSize(RFsize, fileinfo);
 		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
 		printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
 			   getSizeStr(filesize, filesize, 0));
@@ -1405,10 +1410,9 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 	if ((fileinfo->st_flags & UF_COMPRESSED) == 0)
 	{
 		ret = filesize_rounded = filesize = fileinfo->st_size;
-		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+		filesize_rounded = roundToBlkSize(filesize_rounded, fileinfo);
 		filesize += RFsize;
-		filesize_rounded += RFsize;
-		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+		filesize_rounded = roundToBlkSize(filesize_rounded + RFsize, fileinfo);
 		folderinfo->uncompressed_size += filesize;
 		folderinfo->uncompressed_size_rounded += filesize_rounded;
 		folderinfo->compressed_size += filesize;
@@ -1420,10 +1424,8 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 			filetypeinfo->compressed_size += filesize;
 			filetypeinfo->compressed_size_rounded += filesize_rounded;
 		}
-		filesize = fileinfo->st_size;
-		filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
-		filesize += RFsize;
-		filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
+		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
+		filesize = roundToBlkSize(filesize + RFsize, fileinfo);
 		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
 		folderinfo->total_size += filesize;
 		if (filetypeinfo != NULL && filetype_found)
@@ -1441,12 +1443,12 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				filesize = fileinfo->st_size;
 				printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
 					   getSizeStr(filesize, filesize, 1));
-				filesize_rounded = filesize = RFsize;
-				filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+				filesize = RFsize;
+				filesize_rounded = roundToBlkSize(filesize, fileinfo);
 				printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
 					   getSizeStr(filesize, filesize_rounded, 1));
-				filesize_rounded = filesize = RFsize;
-				filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+				filesize = RFsize;
+				filesize_rounded = roundToBlkSize(filesize, fileinfo);
 				filesize += compattrsize;
 				filesize_rounded += compattrsize;
 				printf("File size (compressed data fork): %s\n", getSizeStr(filesize, filesize_rounded, 0));
@@ -1454,8 +1456,7 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 				printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
 				printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
-				filesize = RFsize;
-				filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
+				filesize = roundToBlkSize(RFsize, fileinfo);
 				filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
 				printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
 					   getSizeStr(filesize, filesize, 0));
@@ -1466,8 +1467,8 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 			}
 		}
 
-		filesize_rounded = filesize = fileinfo->st_size;
-		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+		filesize = fileinfo->st_size;
+		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		folderinfo->uncompressed_size += filesize;
 		folderinfo->uncompressed_size_rounded += filesize_rounded;
 		if (filetypeinfo != NULL && filetype_found)
@@ -1475,8 +1476,8 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 			filetypeinfo->uncompressed_size += filesize;
 			filetypeinfo->uncompressed_size_rounded += filesize_rounded;
 		}
-		ret = filesize_rounded = filesize = RFsize;
-		filesize_rounded += (filesize_rounded % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize_rounded % fileinfo->st_blksize) : 0;
+		ret = filesize = RFsize;
+		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		folderinfo->compressed_size += filesize;
 		folderinfo->compressed_size_rounded += filesize_rounded;
 		folderinfo->compattr_size += compattrsize;
@@ -1486,8 +1487,7 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 			filetypeinfo->compressed_size_rounded += filesize_rounded;
 			filetypeinfo->compattr_size += compattrsize;
 		}
-		filesize = RFsize;
-		filesize += (filesize % fileinfo->st_blksize) ? fileinfo->st_blksize - (filesize % fileinfo->st_blksize) : 0;
+		filesize = roundToBlkSize(RFsize, fileinfo);
 		filesize += compattrsize + xattrssize + (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
 		folderinfo->total_size += filesize;
 		folderinfo->num_compressed++;

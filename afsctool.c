@@ -28,6 +28,12 @@
 
 #define xfree(x)	if((x)){free((x)); (x)=NULL;}
 
+#if MAC_OS_X_VERSION_MIN_REQUIRED <= MAC_OS_X_VERSION_10_5
+	static bool legacy_output = true;
+#else
+	static bool legacy_output = false;
+#endif
+
 // use a hard-coded count so all arrays are always sized equally (and the compiler can warn better)
 const int sizeunits = 6;
 const char *sizeunit10_short[sizeunits] = {"KB", "MB", "GB", "TB", "PB", "EB"};
@@ -1319,10 +1325,12 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		filesize = fileinfo->st_size;
 		printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
 			   getSizeStr(filesize, filesize, 1));
-		filesize = RFsize;
-		filesize_rounded = roundToBlkSize(filesize, fileinfo);
-		printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
-			   getSizeStr(filesize, filesize_rounded, 1));
+		if (legacy_output) {
+			filesize = RFsize;
+			filesize_rounded = roundToBlkSize(filesize, fileinfo);
+			printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
+				   getSizeStr(filesize, filesize_rounded, 1));
+		}
 		filesize = RFsize;
 		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		filesize += compattrsize;
@@ -1457,10 +1465,12 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				filesize = fileinfo->st_size;
 				printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
 					   getSizeStr(filesize, filesize, 1));
-				filesize = RFsize;
-				filesize_rounded = roundToBlkSize(filesize, fileinfo);
-				printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
-					   getSizeStr(filesize, filesize_rounded, 1));
+				if (legacy_output) {
+					filesize = RFsize;
+					filesize_rounded = roundToBlkSize(filesize, fileinfo);
+					printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
+						   getSizeStr(filesize, filesize_rounded, 1));
+				}
 				filesize = RFsize;
 				filesize_rounded = roundToBlkSize(filesize, fileinfo);
 				filesize += compattrsize;
@@ -1541,11 +1551,13 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 			   getSizeStr(foldersize, foldersize_rounded, 0));
 	foldersize = folderinfo->compressed_size;
 	foldersize_rounded = folderinfo->compressed_size_rounded;
-	if ((folderinfo->num_hard_link_files == 0 && folderinfo->num_hard_link_folders == 0) || !hardLinkCheck)
+	if (legacy_output
+			&& ((folderinfo->num_hard_link_files == 0 && folderinfo->num_hard_link_folders == 0) || !hardLinkCheck)) {
 		printf("Folder size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
 			   getSizeStr(foldersize, foldersize_rounded, 1));
-	else
+	} else {
 		printf("Folder size (compressed - decmpfs xattr): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
+	}
 	foldersize = folderinfo->compressed_size + folderinfo->compattr_size;
 	foldersize_rounded = folderinfo->compressed_size_rounded + folderinfo->compattr_size;
 	printf("Folder size (compressed): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
@@ -2486,12 +2498,14 @@ next_arg:;
 								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							filesize = folderinfo.filetypes[i].compressed_size;
 							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded;
-							if (folderinfo.filetypes[i].num_hard_link_files == 0 || !hardLinkCheck)
+							if (legacy_output
+									&& (folderinfo.filetypes[i].num_hard_link_files == 0 || !hardLinkCheck)) {
 								printf("File(s) size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
 									   getSizeStr(filesize, filesize_rounded, 1));
-							else
+							} else {
 								printf("File(s) size (compressed - decmpfs xattr): %s\n",
 									   getSizeStr(filesize, filesize_rounded, 0));
+							}
 							filesize = folderinfo.filetypes[i].compressed_size + folderinfo.filetypes[i].compattr_size;
 							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded + folderinfo.filetypes[i].compattr_size;
 							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
@@ -2532,12 +2546,14 @@ next_arg:;
 								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							filesize = alltypesinfo.compressed_size;
 							filesize_rounded = alltypesinfo.compressed_size_rounded;
-							if (alltypesinfo.num_hard_link_files == 0 || !hardLinkCheck)
+							if (legacy_output
+									 && (alltypesinfo.num_hard_link_files == 0 || !hardLinkCheck)) {
 								printf("File(s) size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
 									   getSizeStr(filesize, filesize_rounded, 1));
-							else
+							} else {
 								printf("File(s) size (compressed - decmpfs xattr): %s\n",
 									   getSizeStr(filesize, filesize_rounded, 0));
+							}
 							filesize = alltypesinfo.compressed_size + alltypesinfo.compattr_size;
 							filesize_rounded = alltypesinfo.compressed_size_rounded + alltypesinfo.compattr_size;
 							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));

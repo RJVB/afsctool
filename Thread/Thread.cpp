@@ -13,7 +13,7 @@
 
 #include "Thread/Thread.h"
 
-DWORD thread2ThreadKey = NULL, thread2ThreadKeyClients = 0;
+DWORD thread2ThreadKey = 0, thread2ThreadKeyClients = 0;
 
 #ifdef __windows__
 static char *ExecPath(char **execName=NULL)
@@ -140,7 +140,7 @@ Thread::~Thread()
 	else if( thread2ThreadKeyClients == 1 ){
 		thread2ThreadKeyClients = 0;
 		TlsFree(thread2ThreadKey);
-		thread2ThreadKey = NULL;
+		thread2ThreadKey = 0;
 	}
 }
 

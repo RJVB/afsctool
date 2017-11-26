@@ -2,18 +2,17 @@ cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 project(afsctool VERSION 1.6.8.5)
 set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
 
-set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/modules)
-set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH ON)
+set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules ${CMAKE_MODULE_PATH} )
 
-include(FindPkgConfig)
 include(FeatureSummary)
 
 include(GetGitRevisionDescription)
 
 find_package(ZLIB 1.2.8 REQUIRED)
-pkg_check_modules(SPARSEHASH libsparsehash)
-include_directories(${ZLIB_INCLUDE_DIRS} ${SPARSEHASH_INCLUDEDIR} ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_SOURCE_DIR})
-link_directories(${SPARSEHASH_LIBRARY_DIRS})
+find_package(SPARSEHASH)
+
+include_directories(${ZLIB_INCLUDE_DIRS} ${SPARSEHASH_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+link_directories(${SPARSEHASH_LIBRARY})
 add_definitions(-DSUPPORT_PARALLEL)
 
 git_describe(GIT_FULL_VERSION "--tags")
@@ -47,7 +46,7 @@ add_executable(afsctool
 )
 target_include_directories(afsctool PRIVATE ${CMAKE_SOURCE_DIR})
 # set_target_properties(afsctool PROPERTIES COMPILE_FLAGS -DSUPPORT_PARALLEL)
-target_link_libraries(afsctool ${ZLIB_LIBRARIES} ${SPARSEHASH_LIBRARIES} "-framework CoreServices")
+target_link_libraries(afsctool ${ZLIB_LIBRARIES} ${PKG_SPARSEHASH_LIBRARIES} "-framework CoreServices")
 
 install(TARGETS afsctool DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
-FEATURE_SUMMARY(WHAT ALL)
+FEATURE_SUMMARY(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)

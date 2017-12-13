@@ -34,6 +34,18 @@
 	static bool legacy_output = false;
 #endif
 
+// some constants borrowed from libarchive
+/*
+ * HFS+ compression type.
+ */
+#define CMP_XATTR				3	/* Compressed data is stored in the xattr. */
+#define CMP_RESOURCE_FORK		4	/* Compressed data is stored in the resource fork. */
+#define MAX_DECMPFS_XATTR_SIZE	3802	/* max size that can be stored in the xattr. */
+#define DECMPFS_MAGIC			'cmpf'
+#ifndef DECMPFS_XATTR_NAME
+#define DECMPFS_XATTR_NAME		"com.apple.decmpfs"
+#endif
+
 // use a hard-coded count so all arrays are always sized equally (and the compiler can warn better)
 const int sizeunits = 6;
 const char *sizeunit10_short[sizeunits] = {"KB", "MB", "GB", "TB", "PB", "EB"};
@@ -202,7 +214,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	unsigned long int cmpedsize;
 	char *xattrnames, *curr_attr;
 	ssize_t xattrnamesize;
-	UInt32 cmpf = 'cmpf', orig_mode;
+	UInt32 cmpf = DECMPFS_MAGIC, orig_mode;
 	struct timeval times[2];
 	char *backupName = NULL;
 
@@ -268,8 +280,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		for (curr_attr = xattrnames; curr_attr < xattrnames + xattrnamesize; curr_attr += strlen(curr_attr) + 1)
 		{
-			if ((strcmp(curr_attr, "com.apple.ResourceFork") == 0 && strlen(curr_attr) == 22) ||
-				(strcmp(curr_attr, "com.apple.decmpfs") == 0 && strlen(curr_attr) == 17))
+			if ((strcmp(curr_attr, XATTR_RESOURCEFORK_NAME) == 0 && strlen(curr_attr) == 22) ||
+				(strcmp(curr_attr, DECMPFS_XATTR_NAME) == 0 && strlen(curr_attr) == 17))
 				return;
 		}
 		free(xattrnames);
@@ -393,8 +405,17 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			goto bail;
 		}
 		}
+	// The header of the compression resource fork (16 bytes):
+	// compression magic number
 	*(UInt32 *) outdecmpfsBuf = EndianU32_NtoL(cmpf);
-	*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(4);
+	// the compression type: 4 == compressed data in the resource fork.
+	// FWIW, libarchive has the following comment in archive_write_disk_posix.c :
+	//* If the compressed size is smaller than MAX_DECMPFS_XATTR_SIZE [3802]
+	//* and the block count in the file is only one, store compressed
+	//* data to decmpfs xattr instead of the resource fork.
+	// We do the same below.
+	*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(CMP_RESOURCE_FORK);
+	// the uncompressed filesize
 	*(UInt64 *) (outdecmpfsBuf + 8) = EndianU64_NtoL(filesize);
 	outdecmpfsSize = 0x10;
 	*(UInt32 *) outBuf = EndianU32_NtoB(0x100);
@@ -425,7 +446,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		if (((cmpedsize + outdecmpfsSize) <= 3802) && (numBlocks <= 1))
 		{
-			*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(3);
+			*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(CMP_XATTR);
 			memcpy(outdecmpfsBuf + outdecmpfsSize, outBufBlock, cmpedsize);
 			outdecmpfsSize += cmpedsize;
 			break;
@@ -437,7 +458,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	// outBufBlock isn't needed anymore: deallocate here.
 	free(outBufBlock); outBufBlock = NULL;
 	
-	if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == 4)
+	if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_RESOURCE_FORK)
 	{
 		if ((((double) (currBlock - outBuf + outdecmpfsSize + 50) / filesize) >= (1.0 - minSavings / 100) && minSavings != 0.0) ||
 			currBlock - outBuf + outdecmpfsSize + 50 >= filesize)
@@ -456,13 +477,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		*(UInt32 *) (currBlock + 34) = EndianU32_NtoB(0xA);
 		*(UInt64 *) (currBlock + 38) = EndianU64_NtoL(0xFFFF0100);
 		*(UInt32 *) (currBlock + 46) = 0;
-		if (setxattr(inFile, "com.apple.ResourceFork", outBuf, currBlock - outBuf + 50, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
+		if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, currBlock - outBuf + 50, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 		{
 			fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
 			goto bail;
 		}
 	}
-	if (setxattr(inFile, "com.apple.decmpfs", outdecmpfsBuf, outdecmpfsSize, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
+	if (setxattr(inFile, DECMPFS_XATTR_NAME, outdecmpfsBuf, outdecmpfsSize, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 	{
 		fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
 		goto bail;
@@ -487,12 +508,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	if (chflags(inFile, UF_COMPRESSED | inFileInfo->st_flags) < 0)
 	{
 		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
-		if (removexattr(inFile, "com.apple.decmpfs", XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
+		if (removexattr(inFile, DECMPFS_XATTR_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 		{
 			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 		}
-		if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == 4 &&
-			removexattr(inFile, "com.apple.ResourceFork", XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
+		if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_RESOURCE_FORK &&
+			removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 		{
 			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 		}
@@ -546,12 +567,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				xfree(backupName);
 				goto bail;
 			}
-			if (removexattr(inFile, "com.apple.decmpfs", XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
+			if (removexattr(inFile, DECMPFS_XATTR_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 			{
 				fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 			}
-			if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == 4 && 
-				removexattr(inFile, "com.apple.ResourceFork", XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
+			if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_RESOURCE_FORK && 
+				removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 			{
 				fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 			}
@@ -662,7 +683,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		}
 		for (curr_attr = xattrnames; curr_attr < xattrnames + xattrnamesize; curr_attr += strlen(curr_attr) + 1)
 		{
-			if (strcmp(curr_attr, "com.apple.ResourceFork") == 0 && strlen(curr_attr) == 22)
+			if (strcmp(curr_attr, XATTR_RESOURCEFORK_NAME) == 0 && strlen(curr_attr) == 22)
 			{
 				inRFLen = getxattr(inFile, curr_attr, NULL, 0, 0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
 				if (inRFLen < 0)
@@ -692,7 +713,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 					} while (RFpos < inRFLen && getxattrret > 0);
 				}
 			}
-			if (strcmp(curr_attr, "com.apple.decmpfs") == 0 && strlen(curr_attr) == 17)
+			if (strcmp(curr_attr, DECMPFS_XATTR_NAME) == 0 && strlen(curr_attr) == 17)
 			{
 				indecmpfsLen = getxattr(inFile, curr_attr, NULL, 0, 0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
 				if (indecmpfsLen < 0)
@@ -756,11 +777,13 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		goto bail;
 	}
 	
-	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == 4)
+	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_RESOURCE_FORK)
 	{
 		if (inBuf == NULL)
 		{
-			fprintf(stderr, "%s: Decompression failed; resource fork required for compression type 4 but none exists\n", inFile);
+			fprintf(stderr,
+				"%s: Decompression failed; resource fork required for compression type %d but none exists\n",
+				inFile, CMP_RESOURCE_FORK);
 			xfree(outBuf);
 			goto bail;
 		}
@@ -852,11 +875,13 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			}
 		}
 	}
-	else if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == 3)
+	else if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_XATTR)
 	{
 		if (indecmpfsLen == 0x10)
 		{
-			fprintf(stderr, "%s: Decompression failed; compression type 3 expects compressed data in extended attribute com.apple.decmpfs but none exists\n", inFile);
+			fprintf(stderr,
+				"%s: Decompression failed; compression type %d expects compressed data in extended attribute com.apple.decmpfs but none exists\n",
+				inFile, CMP_XATTR);
 			xfree(outBuf);
 			goto bail;
 		}
@@ -905,7 +930,8 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 	}
 	else
 	{
-		fprintf(stderr, "%s: Decompression failed; unknown compression type %u\n", inFile, (unsigned int) EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)));
+		fprintf(stderr, "%s: Decompression failed; unknown compression type %u\n",
+				inFile, (unsigned int) EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)));
 		xfree(outBuf);
 		goto bail;
 	}
@@ -941,12 +967,12 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 	
 	fclose(in);
 	
-	if (removexattr(inFile, "com.apple.decmpfs", XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
+	if (removexattr(inFile, DECMPFS_XATTR_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 	{
 		fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 	}
-	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == 4 && 
-		removexattr(inFile, "com.apple.ResourceFork", XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
+	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_RESOURCE_FORK && 
+		removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 	{
 		fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 	}
@@ -1225,8 +1251,9 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 {
 	char *xattrnames, *curr_attr, *filetype;
 	ssize_t xattrnamesize, xattrssize = 0, xattrsize, RFsize = 0, compattrsize = 0;
-	long long int filesize, filesize_rounded;
+	long long int filesize, filesize_rounded, filesize_reported = 0;
 	int numxattrs = 0, numhiddenattr = 0;
+	UInt32 compressionType = 0;
 	bool hasRF = FALSE;
 	
 	printf("%s:\n", filepath);
@@ -1257,16 +1284,32 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 				return;
 			}
 			numxattrs++;
-			if (strcmp(curr_attr, "com.apple.ResourceFork") == 0 && strlen(curr_attr) == 22)
+			if (strcmp(curr_attr, XATTR_RESOURCEFORK_NAME) == 0 && strlen(curr_attr) == 22)
 			{
 				RFsize += xattrsize;
 				hasRF = TRUE;
 				numhiddenattr++;
 			}
-			else if (strcmp(curr_attr, "com.apple.decmpfs") == 0 && strlen(curr_attr) == 17)
+			else if (strcmp(curr_attr, DECMPFS_XATTR_NAME) == 0 && strlen(curr_attr) == 17)
 			{
 				compattrsize += xattrsize;
 				numhiddenattr++;
+				if (xattrsize > 0) {
+					void *indecmpfsBuf = calloc(xattrsize, 1);
+					if (indecmpfsBuf) {
+						ssize_t indecmpfsLen = getxattr(filepath, curr_attr, indecmpfsBuf, xattrsize, 
+														0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
+						if (indecmpfsLen >= 0) {
+							if ((*(UInt32 *) indecmpfsBuf) != EndianU32_NtoL(DECMPFS_MAGIC)) {
+								fprintf( stderr, "Warning: \"%s\" has unknown compression magic 0x%lx\n",
+										 filepath, *(UInt32 *) indecmpfsBuf );
+							}
+							compressionType = EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4));
+							filesize_reported = EndianU64_LtoN(*(UInt64 *) (indecmpfsBuf + 8));
+						}
+						free(indecmpfsBuf);
+					}
+				}
 			}
 			else
 				xattrssize += xattrsize;
@@ -1320,6 +1363,17 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 	{
 		if (!appliedcomp)
 			printf("File is HFS+/APFS compressed.\n");
+		switch (compressionType) {
+			case CMP_XATTR:
+				printf("Compression type: decmpfs xattr\n");
+				break;
+			case CMP_RESOURCE_FORK:
+				printf("Compression type: resource fork\n");
+				break;
+			default:
+				printf("Unknown compression type: %u\n", compressionType);
+				break;
+		}
 		if ((filetype = getFileType(filepath)) != NULL)
 		{
 			printf("File content type: %s\n", filetype);
@@ -1350,6 +1404,9 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		}
 		printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
 			   getSizeStr(filesize, filesize, 0));
+		if (filesize_reported) {
+			printf("Uncompressed file size reported in compressed header: %lld bytes\n", filesize_reported);
+		}
 	}
 }
 
@@ -1394,12 +1451,12 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				return 0;
 			}
 			numxattrs++;
-			if (strcmp(curr_attr, "com.apple.ResourceFork") == 0 && strlen(curr_attr) == 22)
+			if (strcmp(curr_attr, XATTR_RESOURCEFORK_NAME) == 0 && strlen(curr_attr) == 22)
 			{
 				RFsize += xattrsize;
 				numhiddenattr++;
 			}
-			else if (strcmp(curr_attr, "com.apple.decmpfs") == 0 && strlen(curr_attr) == 17)
+			else if (strcmp(curr_attr, DECMPFS_XATTR_NAME) == 0 && strlen(curr_attr) == 17)
 			{
 				compattrsize += xattrsize;
 				numhiddenattr++;
@@ -2184,8 +2241,8 @@ next_arg:;
 							free(xattrnames);
 							return -1;
 						}
-						if (((strcmp(curr_attr, "com.apple.ResourceFork") == 0 && strlen(curr_attr) == 22) ||
-							(strcmp(curr_attr, "com.apple.decmpfs") == 0 && strlen(curr_attr) == 17)) &&
+						if (((strcmp(curr_attr, XATTR_RESOURCEFORK_NAME) == 0 && strlen(curr_attr) == 22) ||
+							(strcmp(curr_attr, DECMPFS_XATTR_NAME) == 0 && strlen(curr_attr) == 17)) &&
 							xattrsize != 0)
 						{
 							attr_buf = malloc(xattrsize);

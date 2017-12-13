@@ -1365,10 +1365,10 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 			printf("File is HFS+/APFS compressed.\n");
 		switch (compressionType) {
 			case CMP_XATTR:
-				printf("Compression type: decmpfs xattr\n");
+				printf("Compression type: decmpfs xattr (%u)\n", compressionType);
 				break;
 			case CMP_RESOURCE_FORK:
-				printf("Compression type: resource fork\n");
+				printf("Compression type: resource fork (%u)\n", compressionType);
 				break;
 			default:
 				printf("Unknown compression type: %u\n", compressionType);
@@ -1380,7 +1380,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 			free(filetype);
 		}
 		filesize = fileinfo->st_size;
-		printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
+		printf("File size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
 			   getSizeStr(filesize, filesize, 1));
 		if (legacy_output) {
 			filesize = RFsize;
@@ -1392,7 +1392,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		filesize += compattrsize;
 		filesize_rounded += compattrsize;
-		printf("File size (compressed data fork): %s\n", getSizeStr(filesize, filesize_rounded, 0));
+		printf("File size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 		printf("Compression savings: %0.1f%%\n", (1.0 - (((double) RFsize + compattrsize) / fileinfo->st_size)) * 100.0);
 		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);

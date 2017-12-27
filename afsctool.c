@@ -15,6 +15,8 @@
 #include <signal.h>
 #include <zlib.h>
 
+#include <sys/attr.h>
+
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreServices/CoreServices.h>
 
@@ -158,20 +160,67 @@ static void signal_handler(int sig)
 bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, bool *isAPFS)
 {
 	struct statfs fsInfo;
+	errno = 0;
 	int ret = statfs(inFile, &fsInfo);
-//	fprintf( stderr, "statfs=%d f_type=%u \"%s\" ISREG=%d UF_COMPRESSED=%d compressable=%d\n",
-//			ret, fsInfo.f_type, fsInfo.f_fstypename, S_ISREG(inFileInfo->st_mode), (inFileInfo->st_flags & UF_COMPRESSED),
-//			ret >= 0 && fsInfo.f_type == 17
-//				&& S_ISREG(inFileInfo->st_mode)
-//				&& (inFileInfo->st_flags & UF_COMPRESSED) == 0 );
+	// https://github.com/RJVB/afsctool/pull/1#issuecomment-352727426
+	uint32_t MNTTYPE_ZFS_SUBTYPE = 'Z'<<24|'F'<<16|'S'<<8;
+// 	fprintf( stderr, "statfs=%d f_type=%u f_fssubtype=%u \"%s\" ISREG=%d UF_COMPRESSED=%d compressable=%d\n",
+// 			ret, fsInfo.f_type, fsInfo.f_fssubtype, fsInfo.f_fstypename,
+// 			S_ISREG(inFileInfo->st_mode), (inFileInfo->st_flags & UF_COMPRESSED),
+// 			ret >= 0 && fsInfo.f_type == 17
+// 				&& S_ISREG(inFileInfo->st_mode)
+// 				&& (inFileInfo->st_flags & UF_COMPRESSED) == 0 );
 	bool _isAPFS = !strncasecmp(fsInfo.f_fstypename, "apfs", 4);
+	bool _isZFS = (fsInfo.f_fssubtype == MNTTYPE_ZFS_SUBTYPE);
 	if (isAPFS) {
-		*isAPFS = _isAPFS;
+		*isAPFS = ret >= 0 ? _isAPFS && !_isZFS : false;
 	}
+	if (ret < 0) {
+		fprintf( stderr, "\"%s\": %s\n", inFile, strerror(errno) );
+		return false;
+	}
+#ifndef HFSCOMPRESS_TO_ZFS
+	if (_isZFS) {
+		// ZFS doesn't do HFS/decmpfs compression. It may pretend to, but in
+		// that case it will *de*compress the data before committing it. We
+		// won't play that game, wasting cycles and rewriting data for nothing.
+		return false;
+	}
+#endif
+#ifdef VOL_CAP_FMT_DECMPFS_COMPRESSION
+	// https://opensource.apple.com/source/copyfile/copyfile-146/copyfile.c.auto.html
+	int rv;
+	struct attrlist attrs;
+	char volroot[MAXPATHLEN + 1];
+	struct {
+		uint32_t length;
+		vol_capabilities_attr_t volAttrs;
+	} volattrs;
+
+	strlcpy(volroot, fsInfo.f_mntonname, sizeof(volroot));
+	memset(&attrs, 0, sizeof(attrs));
+	attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+	attrs.volattr = ATTR_VOL_CAPABILITIES;
+
+	errno = 0;
+	rv = getattrlist(volroot, &attrs, &volattrs, sizeof(volattrs), 0);
+// 	fprintf( stderr, "volattrs for \"%s\": rv=%d VOL_CAP_FMT_DECMPFS_COMPRESSION=%d:%d\n", volroot,
+// 		rv,
+// 		(bool)(volattrs.volAttrs.capabilities[VOL_CAPABILITIES_FORMAT] & VOL_CAP_FMT_DECMPFS_COMPRESSION),
+// 		(bool)(volattrs.volAttrs.valid[VOL_CAPABILITIES_FORMAT] & VOL_CAP_FMT_DECMPFS_COMPRESSION)
+// 	);
+	if (errno) {
+		fprintf( stderr, "Error getting volattrs for \"%s\": %s\n", volroot, strerror(errno) );
+	}
+	return (rv != -1 &&
+		(volattrs.volAttrs.capabilities[VOL_CAPABILITIES_FORMAT] & VOL_CAP_FMT_DECMPFS_COMPRESSION) &&
+		(volattrs.volAttrs.valid[VOL_CAPABILITIES_FORMAT] & VOL_CAP_FMT_DECMPFS_COMPRESSION) );
+#else
 	return (ret >= 0
 		&& (!strncasecmp(fsInfo.f_fstypename, "hfs", 3) || _isAPFS)
 		&& S_ISREG(inFileInfo->st_mode)
 		&& (inFileInfo->st_flags & UF_COMPRESSED) == 0);
+#endif
 }
 
 /*! Mac OS X basename() can modify the input string when not in 'legacy' mode on 10.6

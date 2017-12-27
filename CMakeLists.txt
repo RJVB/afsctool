@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
-project(afsctool VERSION 1.6.8.5)
+project(afsctool VERSION 1.6.8.6)
 set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
+
+option(HFSCOMPRESS_TO_ZFS
+    "Should afsctool compress files on ZFS dataset that claim to be HFS (testing only: the effort will be wasted)"
+    OFF)
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules ${CMAKE_MODULE_PATH} )
 
@@ -44,6 +48,10 @@ add_executable(afsctool
     CritSectEx/msemul.cpp
     CritSectEx/timing.c
 )
+if(HFSCOMPRESS_TO_ZFS)
+    set_source_files_properties(afsctool.c PROPERTIES COMPILE_DEFINITIONS HFSCOMPRESS_TO_ZFS)
+endif()
+
 target_include_directories(afsctool PRIVATE ${CMAKE_SOURCE_DIR})
 # set_target_properties(afsctool PROPERTIES COMPILE_FLAGS -DSUPPORT_PARALLEL)
 target_link_libraries(afsctool ${ZLIB_LIBRARIES} ${PKG_SPARSEHASH_LIBRARIES} "-framework CoreServices")

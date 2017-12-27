@@ -6,6 +6,7 @@ Build Directory Count=2
 Current Build Directory Index=1
 Current Build Directory Index-Host System=1
 ProjectRootRelative=./
+Temporary Build Directory Index=1
 
 [CMake][CMake Build Directory 0]
 Build Directory Path=file:///Users/bertin/cworks/MacOSX/afsctool_34/build
@@ -178,3 +179,16 @@ Override Number Of Jobs=true
 
 [Project]
 VersionControlSupport=kdevgit
+
+[SourceFormatter]
+OverrideKateIndentation=true
+UseDefault=false
+text/x-c++hdr=kdevastyle||User5
+text/x-c++src=kdevastyle||User5
+text/x-chdr=kdevastyle||User3
+text/x-csharp=kdevcustomscript||GNU_indent_GNU
+text/x-csrc=kdevastyle||User3
+text/x-java=kdevcustomscript||GNU_indent_GNU
+text/x-objc++src=kdevastyle||1TBS
+text/x-objchdr=kdevastyle||1TBS
+text/x-objcsrc=kdevastyle||1TBS

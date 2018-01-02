@@ -214,7 +214,9 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, bool *isAPF
 	}
 	return (rv != -1 &&
 		(volattrs.volAttrs.capabilities[VOL_CAPABILITIES_FORMAT] & VOL_CAP_FMT_DECMPFS_COMPRESSION) &&
-		(volattrs.volAttrs.valid[VOL_CAPABILITIES_FORMAT] & VOL_CAP_FMT_DECMPFS_COMPRESSION) );
+		(volattrs.volAttrs.valid[VOL_CAPABILITIES_FORMAT] & VOL_CAP_FMT_DECMPFS_COMPRESSION)
+		&& S_ISREG(inFileInfo->st_mode)
+		&& (inFileInfo->st_flags & UF_COMPRESSED) == 0 );
 #else
 	return (ret >= 0
 		&& (!strncasecmp(fsInfo.f_fstypename, "hfs", 3) || _isAPFS)

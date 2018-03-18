@@ -35,3 +35,16 @@ obtained with as many worker threads as there are CPU cores. Collections with
 a significant number of very large files and many more smaller files can apparently
 be processed faster when using a rather larger number of workers, with a gain
 approaching the number of cores.
+
+Version 1.6.9 introduces two new options for the parallel compression mode:
+- size-sorting the item list (-S option). The parallel workers each take the next
+  uncompressed file off the item list, which normally is in the order in which
+  files were found during the scan for compressable files in the user arguments.
+  Sorting this list means that the smallest files will be compressed first, which
+  may be of interest when the target disk is very (almost) full and the list also
+  contains large files (which require more space for the temporary backup).
+- reverse workers (-RM option) when using a sorted list. This option configures <M>
+  out of the <N> worker threads to take items off the back of the list. The main
+  purpose of the option is to combine `-Ji -S -Ri`, i.e. compress the largest files
+  first. This may be beneficial to help limit (free space) fragmentation (if that's
+  the goal, using a single worker thread is probably best).

@@ -144,7 +144,7 @@ class ParallelFileProcessor : public ParallelProcessor<FileEntry>
 	typedef std::deque<FileProcessor*> PoolType;
 
 public:
-	ParallelFileProcessor(const int n=1, const int verboseLevel=0);
+	ParallelFileProcessor(int n=1, int r=0, int verboseLevel=0);
 	virtual ~ParallelFileProcessor()
 	{
 		if( verboseLevel > 1 && (listLockConflicts() || ioLock->lockCounter) ){
@@ -176,6 +176,8 @@ protected:
 	int workerDone(FileProcessor *worker);
 	// the number of configured or active worker threads
 	volatile long nJobs;
+	// the number of jobs attacking the item list from the rear
+	volatile long nReverse;
 	// the number of processing threads
 	volatile long nProcessing;
 	// the number of processed items
@@ -195,10 +197,11 @@ friend class FileEntry;
 class FileProcessor : public Thread
 {
 public:
-	FileProcessor(ParallelFileProcessor *PP, const int procID)
+	FileProcessor(ParallelFileProcessor *PP, bool isReverse, int procID)
 		: PP(PP)
 		, nProcessed(-1)
 		, Thread()
+		, isBackwards(isReverse)
 		, procID(procID)
 		, scope(NULL)
 		, runningTotalCompressed(0)
@@ -240,6 +243,7 @@ protected:
 	volatile long nProcessed;
 	volatile long long runningTotalRaw, runningTotalCompressed;
 	volatile double cpuUsage;
+	const bool isBackwards;
 	const int procID;
 	CRITSECTLOCK::Scope *scope;
 	friend class ParallelFileProcessor;

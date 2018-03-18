@@ -91,10 +91,11 @@ void FileEntry::compress(FileProcessor *worker, ParallelFileProcessor *PP)
 
 // ================================= ParallelFileProcessor methods =================================
 
-ParallelFileProcessor::ParallelFileProcessor(const int n, const int verbose)
+ParallelFileProcessor::ParallelFileProcessor(int n, int r, int verbose)
 {
 	threadPool.clear();
 	nJobs = n;
+	nReverse = r;
 	nProcessing = 0;
 	nProcessed = 0;
 	allDoneEvent = NULL;
@@ -105,9 +106,9 @@ ParallelFileProcessor::ParallelFileProcessor(const int n, const int verbose)
 	memset( &jobInfo, 0, sizeof(jobInfo) );
 }
 
-ParallelFileProcessor *createParallelProcessor(const int n, const int verboseLevel)
+ParallelFileProcessor *createParallelProcessor(int n, int r, int verboseLevel)
 {
-	return new ParallelFileProcessor(n, verboseLevel);
+	return new ParallelFileProcessor(n, r, verboseLevel);
 }
 
 // attempt to lock the ioLock; returns a success value
@@ -147,7 +148,10 @@ int ParallelFileProcessor::run()
 		allDoneEvent = CreateEvent( NULL, false, false, NULL );
 	}
 	for( i = 0 ; i < nJobs ; ++i ){
-	 FileProcessor *thread = new FileProcessor(this, i);
+		// workers attacking the item list rear are created last
+		// (not that this makes any difference except in the stats summary print out...)
+		bool fromRear = i >= nJobs - nReverse;
+		FileProcessor *thread = new FileProcessor(this, fromRear, i);
 		if( thread ){
 			threadPool.push_back(thread);
 		}
@@ -221,6 +225,9 @@ int ParallelFileProcessor::run()
 					thread->runningTotalRaw/1024.0, thread->runningTotalRaw/1024.0/thread->nProcessed,
 					thread->runningTotalCompressed/1024.0, thread->runningTotalCompressed/1024.0/thread->nProcessed,
 					100.0 * double(thread->runningTotalRaw - thread->runningTotalCompressed) / double(thread->runningTotalRaw) );
+				if( thread->isBackwards ){
+					fprintf( stderr, " [reverse]");
+				}
 				if( verboseLevel > 1 ){
 					fputc( '\n', stderr );
 					mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
@@ -267,7 +274,7 @@ DWORD FileProcessor::Run(LPVOID arg)
 	if( PP ){
 	 FileEntry entry;
 		nProcessed = 0;
-		while( !PP->quitRequested() && PP->getFront(entry) ){
+		while( !PP->quitRequested() && (isBackwards ? PP->getBack(entry) : PP->getFront(entry)) ){
 		 // create a scoped lock without closing it immediately
 		 CRITSECTLOCK::Scope scp(PP->ioLock, 0);
 			scope = &scp;
@@ -351,6 +358,28 @@ bool addFileToParallelProcessor(ParallelFileProcessor *p, const char *inFile, co
 	}
 	else{
 //		   fprintf( stderr, "Error: Processor=%p file=%p, finfo=%p dinfo=%p, own=%d\n", p, inFile, inFileInfo, folderInfo, ownInfo );
+		return false;
+	}
+}
+
+static int sizeLess(const FileEntry &a, const FileEntry &b)
+{
+	return a.fileInfo.st_size < b.fileInfo.st_size;
+}
+
+bool sortFilesInParallelProcessorBySize(ParallelFileProcessor *p)
+{
+	if( p && p->itemCount() > 0 ){
+		if( p->verbose() ){
+			fprintf( stderr, "Sorting %lu entries ...", p->itemCount() ); fflush(stderr);
+		}
+		std::sort( p->items().begin(), p->items().end(), sizeLess);
+		if( p->verbose() ){
+			fprintf( stderr, " done\n" );
+		}
+		return true;
+	}
+	else{
 		return false;
 	}
 }

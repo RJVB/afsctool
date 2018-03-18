@@ -1352,7 +1352,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 														0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
 						if (indecmpfsLen >= 0) {
 							if ((*(UInt32 *) indecmpfsBuf) != EndianU32_NtoL(DECMPFS_MAGIC)) {
-								fprintf( stderr, "Warning: \"%s\" has unknown compression magic 0x%lx\n",
+								fprintf( stderr, "Warning: \"%s\" has unknown compression magic 0x%x\n",
 										 filepath, *(UInt32 *) indecmpfsBuf );
 							}
 							compressionType = EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4));
@@ -1858,7 +1858,7 @@ void printUsage()
 		   "Create archive file with compressed data in data fork:    afsctool -a[d] src dst [... srcN dstN]\n"
 		   "Extract HFS+/APFS compression archive to file:            afsctool -x[d] src dst [... srcN dstN]\n"
 #ifdef SUPPORT_PARALLEL
-		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvvib] [-jN|-JN] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
+		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvvib] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
 #else
 		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvvib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
 #endif
@@ -1877,6 +1877,8 @@ void printUsage()
 #ifdef SUPPORT_PARALLEL
 		   "-jN compress (only compressable) files using <N> threads (compression is concurrent, disk IO is exclusive)\n"
 		   "-JN read, compress and write files (only compressable ones) using <N> threads (everything is concurrent except writing the compressed file)\n"
+		   "-S sort the item list by file size (leaving the largest files to the end may be beneficial if the target volume is almost full)\n"
+		   "-RM <M> of the <N> workers will work the item list (must be sorted!) in reverse order, starting with the largest files\n"
 #endif
 		   "-<level> Compression level to use when compressing (ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n"
 		  , AFSCTOOL_FULL_VERSION_STRING);
@@ -1908,8 +1910,8 @@ int afsctool (int argc, const char * argv[])
 	void *attr_buf;
 	UInt16 big16;
 	UInt64 big64;
-	int nJobs = 0;
-	bool testQueue = false;
+	int nJobs = 0, nReverse = 0;
+	bool testQueue = false, sortQueue = false;
 
 	folderinfo.filetypeslist = NULL;
 	folderinfo.filetypeslistlen = 0;
@@ -2083,6 +2085,7 @@ int afsctool (int argc, const char * argv[])
 				case 'j':
 				case 'J':
 				case 'T':
+				case 'R':
 					if (!applycomp)
 					{
 						printUsage();
@@ -2096,12 +2099,33 @@ int afsctool (int argc, const char * argv[])
 					{
 						testQueue = true;
 					}
-					nJobs = atoi(&argv[i][j+1]);
-					if (nJobs <= 0)
+					if (argv[i][j] == 'R')
 					{
-						fprintf( stderr, "Warning: jobs must be a positive number (%s)\n", argv[i] );
-						nJobs = 0;
+						nReverse = atoi(&argv[i][j+1]);
+						if (nReverse <= 0)
+						{
+							fprintf( stderr, "Warning: reverse jobs must be a positive number (%s)\n", argv[i] );
+							nReverse = 0;
+						}
 					}
+					else
+					{
+						nJobs = atoi(&argv[i][j+1]);
+						if (nJobs <= 0)
+						{
+							fprintf( stderr, "Warning: jobs must be a positive number (%s)\n", argv[i] );
+							nJobs = 0;
+						}
+					}
+					goto next_arg;
+					break;
+				case 'S':
+					if (!applycomp)
+					{
+						printUsage();
+						exit(EINVAL);
+					}
+					sortQueue = true;
 					goto next_arg;
 					break;
 #endif
@@ -2123,7 +2147,12 @@ next_arg:;
 #ifdef SUPPORT_PARALLEL
 	if (nJobs > 0)
 	{
-		PP = createParallelProcessor(nJobs, printVerbose);
+		if (nReverse && !sortQueue)
+		{
+			fprintf( stderr, "Warning: reverse jobs are ignored when the item list is not sorted (-S)\n" );
+			nReverse = 0;
+		}
+		PP = createParallelProcessor(nJobs, nReverse, printVerbose);
 //		if (PP)
 //		{
 //			if (printVerbose)
@@ -2189,7 +2218,10 @@ next_arg:;
 			free(cwd);
 		}
 		else
+		{
+			free_src = FALSE;
 			fullpath = (char *) argv[i];
+		}
 		
 		if (lstat(fullpath, &fileinfo) < 0)
 		{
@@ -2709,6 +2741,10 @@ next_arg:;
 #ifdef SUPPORT_PARALLEL
 	if (PP)
 	{
+		if (sortQueue)
+		{
+			sortFilesInParallelProcessorBySize(PP);
+		}
 		if (!testQueue)
 		{
 			if (filesInParallelProcessor(PP))

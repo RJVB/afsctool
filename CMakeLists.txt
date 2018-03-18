@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
-project(afsctool VERSION 1.6.8.6)
+project(afsctool VERSION 1.6.9)
 set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
 
 option(HFSCOMPRESS_TO_ZFS

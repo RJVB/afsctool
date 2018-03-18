@@ -10,7 +10,6 @@
 
 #include "afsctool.h"
 
-#include <queue>
 #include <deque>
 #include <string>
 
@@ -24,7 +23,7 @@ class ParallelProcessor
 {
 public:
 	typedef T ItemType;
-	typedef std::queue<ItemType> ItemQueue;
+	typedef std::deque<ItemType> ItemQueue;
 	typedef typename ItemQueue::size_type size_type;
 
 	ParallelProcessor()
@@ -39,7 +38,7 @@ public:
 		 CRITSECTLOCK::Scope scope(listLock, 2500);
 			fprintf( stderr, "~ParallelProcessor(%p): clearing itemList[%lu]\n", this, itemList.size() );
 			while( !itemList.empty() ){
-				itemList.pop();
+				itemList.pop_front();
 			}
 		}
 		delete listLock;
@@ -76,24 +75,43 @@ public:
 		}
 		if( !itemList.empty() ){
 			value = itemList.front();
-			itemList.pop();
+			itemList.pop_front();
 			ret = true;
 		}
 		return ret;
 	}
+
+	bool getBack(T &value)
+	{ bool ret = false;
+	  bool wasLocked = listLock->IsLocked();
+		CRITSECTLOCK::Scope scope(listLock);
+		if( wasLocked ){
+			listLock->lockCounter += 1;
+		}
+		if( !itemList.empty() ){
+			value = itemList.back();
+			itemList.pop_back();
+			ret = true;
+		}
+		return ret;
+	}
+
 	bool quitRequested()
 	{
 		return quitRequestedFlag;
 	}
+
 	bool setQuitRequested(bool val)
 	{ bool ret = quitRequestedFlag;
 		quitRequestedFlag = val;
 		return ret;
 	}
+
 	inline unsigned long listLockConflicts() const
 	{
 		return listLock->lockCounter;
 	}
+
 protected:
 	ItemQueue itemList;
 	CRITSECTLOCK *listLock;

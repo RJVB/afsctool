@@ -342,10 +342,10 @@ bool addFileToParallelProcessor(ParallelFileProcessor *p, const char *inFile, co
 {
 	if( p && inFile && inFileInfo && folderInfo ){
 		if( ownInfo ){
-			p->items().push(FileEntry( inFile, inFileInfo, new FolderInfo(*folderInfo), ownInfo ));
+			p->items().push_back(FileEntry( inFile, inFileInfo, new FolderInfo(*folderInfo), ownInfo ));
 		}
 		else{
-			p->items().push(FileEntry( inFile, inFileInfo, folderInfo, ownInfo ));
+			p->items().push_back(FileEntry( inFile, inFileInfo, folderInfo, ownInfo ));
 		}
 		return true;
 	}

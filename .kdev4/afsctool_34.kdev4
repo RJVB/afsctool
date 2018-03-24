@@ -6,7 +6,6 @@ Build Directory Count=2
 Current Build Directory Index=1
 Current Build Directory Index-Host System=1
 ProjectRootRelative=./
-Temporary Build Directory Index=1
 
 [CMake][CMake Build Directory 0]
 Build Directory Path=file:///Users/bertin/cworks/MacOSX/afsctool_34/build
@@ -22,7 +21,7 @@ Build Type=MacPorts
 CMake Binary=/opt/local/bin/cmake2port_noserver
 CMake Executable=/opt/local/bin/cmake2port_noserver
 Environment Profile=
-Extra Arguments=-nvok --port afsctool --configure.optflags "-O3 -march=native -mdynamic-no-pic -g" configure.compiler=macports-clang-4.0
+Extra Arguments=-nvok --port afsctool --configure.optflags "-O3 -march=native -mdynamic-no-pic -g" configure.compiler=macports-clang-5.0
 Install Directory=/opt/local
 Runtime=Host System
 

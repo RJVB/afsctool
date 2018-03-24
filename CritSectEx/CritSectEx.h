@@ -234,8 +234,6 @@ class MutexEx {
 		volatile bool	bUnlocking;
 // #endif
 		volatile bool	bTimedOut;
-public:
-		volatile unsigned long lockCounter;
 		size_t scopesUnlocked, scopesLocked;
 	} m;
 
@@ -366,9 +364,9 @@ public:
 		m.hMutex = &m.mMutex;
 		m.scopesUnlocked = m.scopesLocked = 0;
 #endif
+		lockCounter = 0;
 #ifdef DEBUG
 		m.hLockerThreadId = -1;
-		lockCounter = 0;
 		init_HRTime();
 #endif
 	}

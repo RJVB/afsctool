@@ -1,0 +1,7 @@
+# @see: https://docs.travis-ci.com/
+os: osx
+install:
+- brew install google-sparsehash
+script:
+- cmake .
+- make

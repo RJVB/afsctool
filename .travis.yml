@@ -1,7 +1,7 @@
 # @see: https://docs.travis-ci.com/
 os: osx
 install:
-- brew install google-sparsehash
+- brew install google-sparsehash zlib
 script:
 - mkdir build
 - cd build

@@ -3,5 +3,8 @@ os: osx
 install:
 - brew install google-sparsehash
 script:
-- cmake .
-- make
+- mkdir build
+- cd build
+- cmake ..
+- make V=1 VERBOSE=1
+- make V=1 VERBOSE=1 install/fast DESTDIR=../destroot

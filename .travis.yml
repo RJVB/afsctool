@@ -2,6 +2,8 @@
 os: osx
 install:
 - brew install google-sparsehash zlib
+env:
+- PKG_CONFIG_PATH=/usr/local/opt/zlib/lib/pkgconfig
 script:
 - mkdir build
 - cd build

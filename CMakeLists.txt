@@ -54,7 +54,7 @@ endif()
 
 target_include_directories(afsctool PRIVATE ${CMAKE_SOURCE_DIR})
 # set_target_properties(afsctool PROPERTIES COMPILE_FLAGS -DSUPPORT_PARALLEL)
-target_link_libraries(afsctool ${ZLIBP_LIBRARIES} ${PKG_SPARSEHASH_LIBRARIES} "-framework CoreServices")
+target_link_libraries(afsctool ${ZLIBP_LIBRARY_LDFLAGS} ${ZLIBP_LIBRARIES} ${PKG_SPARSEHASH_LIBRARIES} "-framework CoreServices")
 
 install(TARGETS afsctool DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 FEATURE_SUMMARY(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)

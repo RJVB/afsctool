@@ -6,11 +6,6 @@ include(FeatureSummary)
 
 pkg_check_modules(PKG_ZLIBP zlib)
 
-set(ZLIBP_DEFINITIONS ${PKG_ZLIBP_CFLAGS_OTHER})
-set(ZLIBP_VERSION ${PKG_ZLIBP_VERSION})
-set(ZLIBP_INCLUDE_DIR ${PKG_ZLIBP_INCLUDEDIR})
-set(ZLIBP_LIBRARIES ${PKG_ZLIBP_LIBRARIES})
-
 if(NOT PKG_ZLIBP_FOUND)
 	message(STATUS "zlib was not found with pkg-config, falling back to cmake's find routine")
      # find via cmake's standard FindZLIB
@@ -20,6 +15,13 @@ if(NOT PKG_ZLIBP_FOUND)
 	set(ZLIBP_INCLUDE_DIR ${ZLIB_INCLUDE_DIR})
 	set(ZLIBP_INCLUDE_DIRS ${ZLIB_INCLUDE_DIRS})
 	set(ZLIBP_LIBRARIES ${ZLIB_LIBRARIES})
+	set(ZLIBP_LIBRARY_LDFLAGS "")
+else()
+	set(ZLIBP_DEFINITIONS ${PKG_ZLIBP_CFLAGS_OTHER})
+	set(ZLIBP_VERSION ${PKG_ZLIBP_VERSION})
+	set(ZLIBP_INCLUDE_DIR ${PKG_ZLIBP_INCLUDEDIR})
+	set(ZLIBP_LIBRARIES ${PKG_ZLIBP_LIBRARIES})
+	set(ZLIBP_LIBRARY_LDFLAGS "-L${PKG_ZLIBP_LIBRARY_DIRS}")
 endif()
 
 find_package_handle_standard_args(ZLIBP

@@ -238,8 +238,8 @@ int ParallelFileProcessor::run()
 							info.user_time.seconds + info.user_time.microseconds * 1e-6,
 							info.system_time.seconds + info.system_time.microseconds * 1e-6,
 							info.sleep_time );
-						if( thread->cpuUsage ){
-							fprintf( stderr, "; %0.2lf%% CPU", thread->cpuUsage / thread->nProcessed );
+						if( info.cpu_usage ){
+							fprintf( stderr, "; %0.2lf%% CPU", info.cpu_usage / 10.0 );
 						}
 					}
 				}

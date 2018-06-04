@@ -246,6 +246,8 @@ protected:
 	const bool isBackwards;
 	const int procID;
 	CRITSECTLOCK::Scope *scope;
+	thread_basic_info_data_t threadInfo;
+	bool hasInfo;
 	friend class ParallelFileProcessor;
 private:
 	FileEntry *currentEntry;

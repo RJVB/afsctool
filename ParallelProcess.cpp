@@ -5,12 +5,12 @@
  *  This code is made available under No License At All
  */
 
-#include "ParallelProcess_p.h"
-#include "ParallelProcess.h"
-
 #include <mach/mach_init.h>
 #include <mach/thread_act.h>
 #include <mach/mach_port.h>
+
+#include "ParallelProcess_p.h"
+#include "ParallelProcess.h"
 
 // ================================= FileEntry methods =================================
 
@@ -229,17 +229,13 @@ int ParallelFileProcessor::run()
 					fprintf( stderr, " [reverse]");
 				}
 				if( verboseLevel > 1 ){
-					fputc( '\n', stderr );
-					mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
-					thread_basic_info_data_t info;
-					int kr = thread_info( mach_thread_self(), THREAD_BASIC_INFO, (thread_info_t) &info, &count);
-					if( kr == KERN_SUCCESS ){
-						fprintf( stderr, "\t%gs user + %gs system; %ds slept",
-							info.user_time.seconds + info.user_time.microseconds * 1e-6,
-							info.system_time.seconds + info.system_time.microseconds * 1e-6,
-							info.sleep_time );
-						if( info.cpu_usage ){
-							fprintf( stderr, "; %0.2lf%% CPU", info.cpu_usage / 10.0 );
+					if( thread->hasInfo ){
+						fprintf( stderr, "\n\t%gs user + %gs system; %ds slept",
+							thread->threadInfo.user_time.seconds + thread->threadInfo.user_time.microseconds * 1e-6,
+							thread->threadInfo.system_time.seconds + thread->threadInfo.system_time.microseconds * 1e-6,
+							thread->threadInfo.sleep_time );
+						if( thread->threadInfo.cpu_usage ){
+							fprintf( stderr, "; %0.2lf%% CPU", thread->threadInfo.cpu_usage / 10.0 );
 						}
 					}
 				}
@@ -295,6 +291,8 @@ DWORD FileProcessor::Run(LPVOID arg)
 				int kr = thread_info( mach_thread_self(), THREAD_BASIC_INFO, (thread_info_t) &info, &count);
 				if( kr == KERN_SUCCESS ){
 					 cpuUsage += info.cpu_usage/10.0;
+					 threadInfo = info;
+					 hasInfo = true;
 				}
 			}
 		}
@@ -308,6 +306,8 @@ void FileProcessor::InitThread()
 //	extern int pthread_setname_np(const char *);
 	snprintf( name, 16, "FilePr #%d", procID );
 	pthread_setname_np(name);
+	memset( &threadInfo, 0, sizeof(threadInfo) );
+	hasInfo = false;
 }
 
 inline bool FileProcessor::lockScope()

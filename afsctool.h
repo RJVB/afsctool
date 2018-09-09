@@ -26,6 +26,16 @@
 extern "C" {
 #endif //__cplusplus
 
+// the various types of HFS/APFS compression. Not all are supported (on all OS versions).
+typedef enum compression_type { NONE, ZLIB, LZVN, LZFSE } compression_type;
+
+// some constants borrowed from libarchive
+/*
+ * HFS+ compression type.
+ */
+#define CMP_ZLIB_XATTR				3	/* ZLIB-compressed data is stored in the xattr. */
+#define CMP_ZLIB_RESOURCE_FORK		4	/* ZLIB-compressed data is stored in the resource fork. */
+
 struct folder_info
 {
 	long long int uncompressed_size;
@@ -41,6 +51,7 @@ struct folder_info
 	long long int num_hard_link_folders;
 	long long int maxSize;
 	int print_info;
+    compression_type compressiontype;
 	int compressionlevel;
 	double minSavings;
 	bool print_files;

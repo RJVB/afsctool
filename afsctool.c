@@ -37,11 +37,6 @@
 #endif
 
 // some constants borrowed from libarchive
-/*
- * HFS+ compression type.
- */
-#define CMP_XATTR				3	/* Compressed data is stored in the xattr. */
-#define CMP_RESOURCE_FORK		4	/* Compressed data is stored in the resource fork. */
 #define MAX_DECMPFS_XATTR_SIZE	3802	/* max size that can be stored in the xattr. */
 #define DECMPFS_MAGIC			'cmpf'
 #ifndef DECMPFS_XATTR_NAME
@@ -253,13 +248,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 {
 	long long int maxSize = folderinfo->maxSize;
 	int compressionlevel = folderinfo->compressionlevel;
+	int comptype = folderinfo->compressiontype;
 	bool allowLargeBlocks = folderinfo->allowLargeBlocks;
 	double minSavings = folderinfo->minSavings;
 	bool checkFiles = folderinfo->check_files;
 	bool backupFile = folderinfo->backup_file;
 
 	FILE *in;
-	unsigned int compblksize = 0x10000, numBlocks, outdecmpfsSize = 0;
+	// 64Kb block size (HFS compression is "64K chunked")
+	unsigned int compblksize = 0x10000;
+	unsigned int numBlocks, outdecmpfsSize = 0;
 	void *inBuf = NULL, *outBuf = NULL, *outBufBlock = NULL, *outdecmpfsBuf = NULL, *currBlock = NULL, *blockStart = NULL;
 	long long int inBufPos, filesize = inFileInfo->st_size;
 	unsigned long int cmpedsize;
@@ -340,10 +338,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	numBlocks = (filesize + compblksize - 1) / compblksize;
 	if ((filesize + 0x13A + (numBlocks * 9)) > 2147483647) {
-//		if (folderinfo->print_info > 2)
-//		{
-			fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
-//		}
+		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
 		return;
 	}
 
@@ -446,16 +441,29 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		utimes(inFile, times);
 		goto bail;
 	}
-	{ uLong compLen = compressBound(compblksize);
-		outBufBlock = malloc(compLen);
-		if (outBufBlock == NULL)
-		{
-			fprintf(stderr, "%s: malloc error, unable to allocate compression buffer of %lu bytes (%s)\n",
-					inFile, compLen, strerror(errno));
-			utimes(inFile, times);
-			goto bail;
+	uLong zlib_EstimatedCompressedChunkSize;
+	struct compressionType {
+		UInt32 xattr, resourceFork;
+	} compressionType;
+	switch (comptype) {
+		case ZLIB: {
+			cmpedsize = zlib_EstimatedCompressedChunkSize = compressBound(compblksize);
+			struct compressionType t = {CMP_ZLIB_XATTR, CMP_ZLIB_RESOURCE_FORK};
+			compressionType = t;
+			break;
 		}
-		}
+		default:
+			// noop
+			break;
+	}
+	outBufBlock = malloc(cmpedsize);
+	if (outBufBlock == NULL)
+	{
+		fprintf(stderr, "%s: malloc error, unable to allocate compression buffer of %lu bytes (%s)\n",
+				inFile, cmpedsize, strerror(errno));
+		utimes(inFile, times);
+		goto bail;
+	}
 	// The header of the compression resource fork (16 bytes):
 	// compression magic number
 	*(UInt32 *) outdecmpfsBuf = EndianU32_NtoL(cmpf);
@@ -465,7 +473,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	//* and the block count in the file is only one, store compressed
 	//* data to decmpfs xattr instead of the resource fork.
 	// We do the same below.
-	*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(CMP_RESOURCE_FORK);
+	*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.resourceFork);
 	// the uncompressed filesize
 	*(UInt64 *) (outdecmpfsBuf + 8) = EndianU64_NtoL(filesize);
 	outdecmpfsSize = 0x10;
@@ -477,11 +485,21 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	currBlock = blockStart + 0x4 + (numBlocks * 8);
 	for (inBufPos = 0; inBufPos < filesize; inBufPos += compblksize, currBlock += cmpedsize)
 	{
-		cmpedsize = compressBound(compblksize);
-		if (compress2(outBufBlock, &cmpedsize, inBuf + inBufPos, ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos, compressionlevel) != Z_OK)
-		{
-			utimes(inFile, times);
-			goto bail;
+		void *cursor = inBuf + inBufPos;
+		uLong bytesAfterCursor = ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos;
+		switch (comptype) {
+			case ZLIB:
+				// reset cmpedsize; it may be changed by compress2().
+				cmpedsize = zlib_EstimatedCompressedChunkSize;
+				if (compress2(outBufBlock, &cmpedsize, cursor, bytesAfterCursor, compressionlevel) != Z_OK)
+				{
+					utimes(inFile, times);
+					goto bail;
+				}
+				break;
+			default:
+				// noop
+				break;
 		}
 		if (cmpedsize > (((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos))
 		{
@@ -497,7 +515,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		if (((cmpedsize + outdecmpfsSize) <= 3802) && (numBlocks <= 1))
 		{
-			*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(CMP_XATTR);
+			*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.xattr);
 			memcpy(outdecmpfsBuf + outdecmpfsSize, outBufBlock, cmpedsize);
 			outdecmpfsSize += cmpedsize;
 			break;
@@ -509,7 +527,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	// outBufBlock isn't needed anymore: deallocate here.
 	free(outBufBlock); outBufBlock = NULL;
 	
-	if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_RESOURCE_FORK)
+	if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
 	{
 		if ((((double) (currBlock - outBuf + outdecmpfsSize + 50) / filesize) >= (1.0 - minSavings / 100) && minSavings != 0.0) ||
 			currBlock - outBuf + outdecmpfsSize + 50 >= filesize)
@@ -563,7 +581,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		{
 			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 		}
-		if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_RESOURCE_FORK &&
+		if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK &&
 			removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 		{
 			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
@@ -622,7 +640,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			{
 				fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 			}
-			if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_RESOURCE_FORK && 
+			if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK && 
 				removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 			{
 				fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
@@ -828,13 +846,13 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		goto bail;
 	}
 	
-	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_RESOURCE_FORK)
+	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
 	{
 		if (inBuf == NULL)
 		{
 			fprintf(stderr,
 				"%s: Decompression failed; resource fork required for compression type %d but none exists\n",
-				inFile, CMP_RESOURCE_FORK);
+				inFile, CMP_ZLIB_RESOURCE_FORK);
 			xfree(outBuf);
 			goto bail;
 		}
@@ -926,13 +944,13 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			}
 		}
 	}
-	else if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_XATTR)
+	else if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_ZLIB_XATTR)
 	{
 		if (indecmpfsLen == 0x10)
 		{
 			fprintf(stderr,
 				"%s: Decompression failed; compression type %d expects compressed data in extended attribute com.apple.decmpfs but none exists\n",
-				inFile, CMP_XATTR);
+				inFile, CMP_ZLIB_XATTR);
 			xfree(outBuf);
 			goto bail;
 		}
@@ -1022,7 +1040,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 	{
 		fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 	}
-	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_RESOURCE_FORK && 
+	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK && 
 		removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 	{
 		fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
@@ -1415,11 +1433,11 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		if (!appliedcomp)
 			printf("File is HFS+/APFS compressed.\n");
 		switch (compressionType) {
-			case CMP_XATTR:
-				printf("Compression type: decmpfs xattr (%u)\n", compressionType);
+			case CMP_ZLIB_XATTR:
+				printf("Compression type: ZLIB in decmpfs xattr (%u)\n", compressionType);
 				break;
-			case CMP_RESOURCE_FORK:
-				printf("Compression type: resource fork (%u)\n", compressionType);
+			case CMP_ZLIB_RESOURCE_FORK:
+				printf("Compression type: ZLIB in resource fork (%u)\n", compressionType);
 				break;
 			default:
 				printf("Unknown compression type: %u\n", compressionType);
@@ -1808,7 +1826,9 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 							}
 							else
 #endif
+							{
 								compressFile(currfile->fts_path, currfile->fts_statp, folderinfo, NULL);
+							}
 						}
 						lstat(currfile->fts_path, currfile->fts_statp);
 						if (((currfile->fts_statp->st_flags & UF_COMPRESSED) == 0) && folderinfo->print_files)
@@ -1898,6 +1918,7 @@ int afsctool (int argc, const char * argv[])
 	FTSENT *currfile;
 	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd, *fileextension, *filetype = NULL;
 	int printVerbose = 0, compressionlevel = 5;
+	compression_type compressiontype = ZLIB;
 	double minSavings = 0.0;
 	long long int filesize, filesize_rounded, maxSize = 0;
 	bool printDir = FALSE, decomp = FALSE, createfile = FALSE, extractfile = FALSE, applycomp = FALSE,
@@ -2249,6 +2270,7 @@ next_arg:;
 			struct folder_info fi;
 			fi.maxSize = maxSize;
 			fi.compressionlevel = compressionlevel;
+			fi.compressiontype = compressiontype;
 			fi.allowLargeBlocks = allowLargeBlocks;
 			fi.minSavings = minSavings;
 			fi.check_files = fileCheck;
@@ -2267,7 +2289,9 @@ next_arg:;
 			}
 			else
 #endif
+			{
 				compressFile(fullpath, &fileinfo, &fi, NULL);
+			}
 			lstat(fullpath, &fileinfo);
 		}
 		
@@ -2564,6 +2588,7 @@ next_arg:;
 			folderinfo.check_files = fileCheck;
 			folderinfo.allowLargeBlocks = allowLargeBlocks;
 			folderinfo.compressionlevel = compressionlevel;
+			folderinfo.compressiontype = compressiontype;
 			folderinfo.minSavings = minSavings;
 			folderinfo.maxSize = maxSize;
 			folderinfo.check_hard_links = hardLinkCheck;

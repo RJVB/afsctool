@@ -25,6 +25,10 @@ Extra Arguments=-nvok --port afsctool --configure.optflags "-O3 -march=native -m
 Install Directory=/opt/local
 Runtime=Host System
 
+[Clazy]
+checks=level3
+extraAppend=-isystem /opt/local/libexec/llvm-5.0/lib/clang/5.0.1/include
+
 [Cppcheck]
 checkInformation=true
 checkPerformance=true

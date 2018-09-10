@@ -38,9 +38,11 @@
 
 // some constants borrowed from libarchive
 #define MAX_DECMPFS_XATTR_SIZE	3802	/* max size that can be stored in the xattr. */
-#define DECMPFS_MAGIC			'cmpf'
+#ifndef DECMPFS_MAGIC
+#	define DECMPFS_MAGIC		'cmpf'
+#endif
 #ifndef DECMPFS_XATTR_NAME
-#define DECMPFS_XATTR_NAME		"com.apple.decmpfs"
+#	define DECMPFS_XATTR_NAME	"com.apple.decmpfs"
 #endif
 
 // use a hard-coded count so all arrays are always sized equally (and the compiler can warn better)
@@ -238,6 +240,34 @@ static const char *lbasename(const char *url)
 		}
 	}
 	return c;
+}
+
+const char *compressionTypeName(int type)
+{
+	char *name = "";
+	switch (type) {
+#define STR(v)		#v
+#define STRVAL(v)	STR(v)
+		case CMP_ZLIB_XATTR:
+			name = "ZLIB in decmpfs xattr (" STRVAL(CMP_ZLIB_XATTR) ")";
+			break;
+		case CMP_ZLIB_RESOURCE_FORK:
+			name = "ZLIB in resource fork (" STRVAL(CMP_ZLIB_RESOURCE_FORK) ")";
+			break;
+		case CMP_LZVN_XATTR:
+			name = "LZVN in decmpfs xattr (" STRVAL(CMP_LZVN_XATTR) ")";
+			break;
+		case CMP_LZVN_RESOURCE_FORK:
+			name = "LZVN in resource fork (" STRVAL(CMP_LZVN_RESOURCE_FORK) ")";
+			break;
+		case CMP_LZFSE_XATTR:
+			name = "LZFSE in decmpfs xattr (" STRVAL(CMP_LZFSE_XATTR) ")";
+			break;
+		case CMP_LZFSE_RESOURCE_FORK:
+			name = "LZFSE in resource fork (" STRVAL(CMP_LZFSE_RESOURCE_FORK) ")";
+			break;
+	}
+	return name;
 }
 
 #ifdef SUPPORT_PARALLEL
@@ -466,17 +496,22 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 	// The header of the compression resource fork (16 bytes):
 	// compression magic number
-	*(UInt32 *) outdecmpfsBuf = EndianU32_NtoL(cmpf);
+	decmpfs_disk_header *resourceHeader = (decmpfs_disk_header*) outdecmpfsBuf;
+	// *(UInt32 *) outdecmpfsBuf = EndianU32_NtoL(cmpf);
+	resourceHeader->compression_magic = OSSwapHostToLittleInt32(cmpf);
 	// the compression type: 4 == compressed data in the resource fork.
 	// FWIW, libarchive has the following comment in archive_write_disk_posix.c :
 	//* If the compressed size is smaller than MAX_DECMPFS_XATTR_SIZE [3802]
 	//* and the block count in the file is only one, store compressed
 	//* data to decmpfs xattr instead of the resource fork.
 	// We do the same below.
-	*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.resourceFork);
+	// *(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.resourceFork);
+	resourceHeader->compression_type = OSSwapHostToLittleInt32(compressionType.resourceFork);
 	// the uncompressed filesize
-	*(UInt64 *) (outdecmpfsBuf + 8) = EndianU64_NtoL(filesize);
-	outdecmpfsSize = 0x10;
+	// *(UInt64 *) (outdecmpfsBuf + 8) = EndianU64_NtoL(filesize);
+	resourceHeader->uncompressed_size = OSSwapHostToLittleInt64(filesize);
+	// outdecmpfsSize = 0x10;
+	outdecmpfsSize = sizeof(decmpfs_disk_header);
 	*(UInt32 *) outBuf = EndianU32_NtoB(0x100);
 	*(UInt32 *) (outBuf + 12) = EndianU32_NtoB(0x32);
 	memset(outBuf + 16, 0, 0xF0);
@@ -515,7 +550,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		if (((cmpedsize + outdecmpfsSize) <= 3802) && (numBlocks <= 1))
 		{
-			*(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.xattr);
+			// store in directly into the attribute instead of using the resource fork.
+			// *(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.xattr);
+			resourceHeader->compression_type = OSSwapHostToLittleInt32(compressionType.xattr);
 			memcpy(outdecmpfsBuf + outdecmpfsSize, outBufBlock, cmpedsize);
 			outdecmpfsSize += cmpedsize;
 			break;
@@ -527,14 +564,20 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	// outBufBlock isn't needed anymore: deallocate here.
 	free(outBufBlock); outBufBlock = NULL;
 	
-	if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
+	//if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
+	if (OSSwapLittleToHostInt32(resourceHeader->compression_type) == compressionType.resourceFork)
 	{
 		if ((((double) (currBlock - outBuf + outdecmpfsSize + 50) / filesize) >= (1.0 - minSavings / 100) && minSavings != 0.0) ||
 			currBlock - outBuf + outdecmpfsSize + 50 >= filesize)
 		{
+			// reject the compression result: doesn't meet user criteria or the compressed
+			// version is larger than the uncompressed file.
+			// TODO: shouldn't this be checked for all HFS-compressed types,
+			//       not just for the resource-fork based variant?
 			utimes(inFile, times);
 			goto bail;
 		}
+		// create and write the resource fork:
 		*(UInt32 *) (outBuf + 4) = EndianU32_NtoB(currBlock - outBuf);
 		*(UInt32 *) (outBuf + 8) = EndianU32_NtoB(currBlock - outBuf - 0x100);
 		*(UInt32 *) (blockStart - 4) = EndianU32_NtoB(currBlock - outBuf - 0x104);
@@ -552,6 +595,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			goto bail;
 		}
 	}
+	// set the decmpfs attribute, which may or may not contain compressed data.
 	if (setxattr(inFile, DECMPFS_XATTR_NAME, outdecmpfsBuf, outdecmpfsSize, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 	{
 		fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
@@ -827,13 +871,15 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		fprintf(stderr, "%s: Decompression failed; file flags indicate file is compressed but it does not have a com.apple.decmpfs extended attribute\n", inFile);
 		goto bail;
 	}
-	if (indecmpfsLen < 0x10)
+	if (indecmpfsLen < sizeof(decmpfs_disk_header))
 	{
 		fprintf(stderr, "%s: Decompression failed; extended attribute com.apple.decmpfs is only %ld bytes (it is required to have a 16 byte header)\n", inFile, indecmpfsLen);
 		goto bail;
 	}
-	
-	filesize = EndianU64_LtoN(*(UInt64 *) (indecmpfsBuf + 8));
+
+	decmpfs_disk_header *resourceHeader = (decmpfs_disk_header*) indecmpfsBuf;
+	// filesize = EndianU64_LtoN(*(UInt64 *) (indecmpfsBuf + 8));
+	filesize = OSSwapLittleToHostInt64(resourceHeader->uncompressed_size);
 	if (filesize == 0)
 	{
 		fprintf(stderr, "%s: Decompression failed; file size given in header is 0\n", inFile);
@@ -845,80 +891,140 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		fprintf(stderr, "%s: malloc error, unable to allocate output buffer (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
 		goto bail;
 	}
-	
-	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
-	{
-		if (inBuf == NULL)
-		{
-			fprintf(stderr,
-				"%s: Decompression failed; resource fork required for compression type %d but none exists\n",
-				inFile, CMP_ZLIB_RESOURCE_FORK);
-			xfree(outBuf);
-			goto bail;
-		}
-		if (inRFLen < 0x13A ||
-			inRFLen < EndianU32_BtoN(*(UInt32 *) inBuf) + 0x4)
-		{
-			fprintf(stderr, "%s: Decompression failed; resource fork data is incomplete\n", inFile);
-			if (inBuf != NULL)
-				free(inBuf);
-			if (indecmpfsBuf != NULL)
-				free(indecmpfsBuf);
-			xfree(outBuf);
-			goto bail;
-		}
-		
-		blockStart = inBuf + EndianU32_BtoN(*(UInt32 *) inBuf) + 0x4;
-		numBlocks = EndianU32_NtoL(*(UInt32 *) blockStart);
-		
-		if (inRFLen < EndianU32_BtoN(*(UInt32 *) inBuf) + 0x3A + (numBlocks * 8))
-		{
-			fprintf(stderr, "%s: Decompression failed; resource fork data is incomplete\n", inFile);
-			xfree(outBuf);
-			goto bail;
-		}
-		if (compblksize * (numBlocks - 1) + (filesize % compblksize) > filesize)
-		{
-			fprintf(stderr, "%s: Decompression failed; file size given in header is incorrect\n", inFile);
-			xfree(outBuf);
-			goto bail;
-		}
-		for (currBlock = 0; currBlock < numBlocks; currBlock++)
-		{
-			if (blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))) + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x8 + (currBlock * 8))) > inBuf + inRFLen)
+
+	bool removeResourceFork = false;
+	switch (OSSwapLittleToHostInt32(resourceHeader->compression_type)) {
+		// if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
+		case CMP_ZLIB_RESOURCE_FORK: {
+			if (inBuf == NULL)
+			{
+				fprintf(stderr,
+					"%s: Decompression failed; resource fork required for compression type %d but none exists\n",
+					inFile, CMP_ZLIB_RESOURCE_FORK);
+				xfree(outBuf);
+				goto bail;
+			}
+			if (inRFLen < 0x13A ||
+				inRFLen < EndianU32_BtoN(*(UInt32 *) inBuf) + 0x4)
+			{
+				fprintf(stderr, "%s: Decompression failed; resource fork data is incomplete\n", inFile);
+				if (inBuf != NULL)
+					free(inBuf);
+				if (indecmpfsBuf != NULL)
+					free(indecmpfsBuf);
+				xfree(outBuf);
+				goto bail;
+			}
+			
+			blockStart = inBuf + EndianU32_BtoN(*(UInt32 *) inBuf) + 0x4;
+			numBlocks = EndianU32_NtoL(*(UInt32 *) blockStart);
+			
+			if (inRFLen < EndianU32_BtoN(*(UInt32 *) inBuf) + 0x3A + (numBlocks * 8))
 			{
 				fprintf(stderr, "%s: Decompression failed; resource fork data is incomplete\n", inFile);
 				xfree(outBuf);
 				goto bail;
 			}
-			if (currBlock + 1 != numBlocks)
-				uncmpedsize = compblksize;
-			else
-				uncmpedsize = (filesize - (currBlock * compblksize) < compblksize) ? filesize - (currBlock * compblksize) : compblksize;
-			if ((compblksize * currBlock) + uncmpedsize > filesize)
+			if (compblksize * (numBlocks - 1) + (filesize % compblksize) > filesize)
 			{
 				fprintf(stderr, "%s: Decompression failed; file size given in header is incorrect\n", inFile);
 				xfree(outBuf);
 				goto bail;
 			}
-			if ((*(unsigned char *) (blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))))) == 0xFF)
+			for (currBlock = 0; currBlock < numBlocks; currBlock++)
 			{
-				uncmpedsize = EndianU32_LtoN(*(UInt32 *) (blockStart + 0x8 + (currBlock * 8))) - 1;
-				memcpy(outBuf + (compblksize * currBlock), blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))) + 1, uncmpedsize);
+				if (blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))) + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x8 + (currBlock * 8))) > inBuf + inRFLen)
+				{
+					fprintf(stderr, "%s: Decompression failed; resource fork data is incomplete\n", inFile);
+					xfree(outBuf);
+					goto bail;
+				}
+				if (currBlock + 1 != numBlocks)
+					uncmpedsize = compblksize;
+				else
+					uncmpedsize = (filesize - (currBlock * compblksize) < compblksize) ? filesize - (currBlock * compblksize) : compblksize;
+				if ((compblksize * currBlock) + uncmpedsize > filesize)
+				{
+					fprintf(stderr, "%s: Decompression failed; file size given in header is incorrect\n", inFile);
+					xfree(outBuf);
+					goto bail;
+				}
+				if ((*(unsigned char *) (blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))))) == 0xFF)
+				{
+					uncmpedsize = EndianU32_LtoN(*(UInt32 *) (blockStart + 0x8 + (currBlock * 8))) - 1;
+					memcpy(outBuf + (compblksize * currBlock), blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))) + 1, uncmpedsize);
+				}
+				else
+				{
+					if ((uncmpret = uncompress(outBuf + (compblksize * currBlock), &uncmpedsize, blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))), EndianU32_LtoN(*(UInt32 *) (blockStart + 0x8 + (currBlock * 8))))) != Z_OK)
+					{
+						if (uncmpret == Z_BUF_ERROR)
+						{
+							fprintf(stderr, "%s: Decompression failed; uncompressed data block too large\n", inFile);
+							xfree(outBuf);
+							goto bail;
+						}
+						else if (uncmpret == Z_DATA_ERROR)
+						{
+							fprintf(stderr, "%s: Decompression failed; compressed data block is corrupted\n", inFile);
+							xfree(outBuf);
+							goto bail;
+						}
+						else if (uncmpret == Z_MEM_ERROR)
+						{
+							fprintf(stderr, "%s: Decompression failed; out of memory\n", inFile);
+							xfree(outBuf);
+							goto bail;
+						}
+						else
+						{
+							fprintf(stderr, "%s: Decompression failed; an error occurred during decompression\n", inFile);
+							xfree(outBuf);
+							goto bail;
+						}
+					}
+				}
+				if (uncmpedsize != ((filesize - (currBlock * compblksize) < compblksize) ? filesize - (currBlock * compblksize) : compblksize))
+				{
+					fprintf(stderr, "%s: Decompression failed; uncompressed data block too small\n", inFile);
+					xfree(outBuf);
+					goto bail;
+				}
+			}
+			removeResourceFork = true;
+			break;
+		}
+		// else if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_ZLIB_XATTR)
+		case CMP_ZLIB_XATTR: {
+			const size_t dataStart = sizeof(decmpfs_disk_header) /* 0x10 */;
+			if (indecmpfsLen == dataStart)
+			{
+				fprintf(stderr,
+					"%s: Decompression failed; compression type %d expects compressed data in extended attribute com.apple.decmpfs but none exists\n",
+					inFile, CMP_ZLIB_XATTR);
+				xfree(outBuf);
+				goto bail;
+			}
+			uncmpedsize = filesize;
+			if ((*(unsigned char *) (indecmpfsBuf + dataStart)) == 0xFF)
+			{
+				const size_t offset = dataStart + 1;
+				uncmpedsize = indecmpfsLen - offset;
+				memcpy(outBuf, indecmpfsBuf + offset, uncmpedsize);
 			}
 			else
 			{
-				if ((uncmpret = uncompress(outBuf + (compblksize * currBlock), &uncmpedsize, blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))), EndianU32_LtoN(*(UInt32 *) (blockStart + 0x8 + (currBlock * 8))))) != Z_OK)
+				if ((uncmpret = uncompress(outBuf, &uncmpedsize, indecmpfsBuf + dataStart, indecmpfsLen - dataStart)) != Z_OK)
 				{
 					if (uncmpret == Z_BUF_ERROR)
 					{
-						fprintf(stderr, "%s: Decompression failed; uncompressed data block too large\n", inFile);
+						fprintf(stderr, "%s: Decompression failed; uncompressed data too large\n", inFile);
 						xfree(outBuf);
 						goto bail;
 					}
 					else if (uncmpret == Z_DATA_ERROR)
 					{
-						fprintf(stderr, "%s: Decompression failed; compressed data block is corrupted\n", inFile);
+						fprintf(stderr, "%s: Decompression failed; compressed data is corrupted\n", inFile);
 						xfree(outBuf);
 						goto bail;
 					}
@@ -936,73 +1042,49 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 					}
 				}
 			}
-			if (uncmpedsize != ((filesize - (currBlock * compblksize) < compblksize) ? filesize - (currBlock * compblksize) : compblksize))
+			if (uncmpedsize != filesize)
 			{
 				fprintf(stderr, "%s: Decompression failed; uncompressed data block too small\n", inFile);
 				xfree(outBuf);
 				goto bail;
 			}
+			break;
 		}
-	}
-	else if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_ZLIB_XATTR)
-	{
-		if (indecmpfsLen == 0x10)
-		{
-			fprintf(stderr,
-				"%s: Decompression failed; compression type %d expects compressed data in extended attribute com.apple.decmpfs but none exists\n",
-				inFile, CMP_ZLIB_XATTR);
+		case CMP_LZVN_XATTR: {
+			fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
+					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
 			xfree(outBuf);
 			goto bail;
+			break;
 		}
-		uncmpedsize = filesize;
-		if ((*(unsigned char *) (indecmpfsBuf + 0x10)) == 0xFF)
-		{
-			uncmpedsize = indecmpfsLen - 0x11;
-			memcpy(outBuf, indecmpfsBuf + 0x11, uncmpedsize);
-		}
-		else
-		{
-			if ((uncmpret = uncompress(outBuf, &uncmpedsize, indecmpfsBuf + 0x10, indecmpfsLen - 0x10)) != Z_OK)
-			{
-				if (uncmpret == Z_BUF_ERROR)
-				{
-					fprintf(stderr, "%s: Decompression failed; uncompressed data too large\n", inFile);
-					xfree(outBuf);
-					goto bail;
-				}
-				else if (uncmpret == Z_DATA_ERROR)
-				{
-					fprintf(stderr, "%s: Decompression failed; compressed data is corrupted\n", inFile);
-					xfree(outBuf);
-					goto bail;
-				}
-				else if (uncmpret == Z_MEM_ERROR)
-				{
-					fprintf(stderr, "%s: Decompression failed; out of memory\n", inFile);
-					xfree(outBuf);
-					goto bail;
-				}
-				else
-				{
-					fprintf(stderr, "%s: Decompression failed; an error occurred during decompression\n", inFile);
-					xfree(outBuf);
-					goto bail;
-				}
-			}
-		}
-		if (uncmpedsize != filesize)
-		{
-			fprintf(stderr, "%s: Decompression failed; uncompressed data block too small\n", inFile);
+		case CMP_LZVN_RESOURCE_FORK: {
+			fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
+					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
 			xfree(outBuf);
 			goto bail;
+			break;
 		}
-	}
-	else
-	{
-		fprintf(stderr, "%s: Decompression failed; unknown compression type %u\n",
-				inFile, (unsigned int) EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)));
-		xfree(outBuf);
-		goto bail;
+		case CMP_LZFSE_XATTR: {
+			fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
+					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
+			xfree(outBuf);
+			goto bail;
+			break;
+		}
+		case CMP_LZFSE_RESOURCE_FORK: {
+			fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
+					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
+			xfree(outBuf);
+			goto bail;
+			break;
+		}
+		default: {
+			fprintf(stderr, "%s: Decompression failed; unknown compression type %s\n",
+					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
+			xfree(outBuf);
+			goto bail;
+			break;
+		}
 	}
 	
 	if (chflags(inFile, (~UF_COMPRESSED) & inFileInfo->st_flags) < 0)
@@ -1040,7 +1122,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 	{
 		fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 	}
-	if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK && 
+	if (removeResourceFork && 
 		removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 	{
 		fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
@@ -1434,10 +1516,22 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 			printf("File is HFS+/APFS compressed.\n");
 		switch (compressionType) {
 			case CMP_ZLIB_XATTR:
-				printf("Compression type: ZLIB in decmpfs xattr (%u)\n", compressionType);
+				printf("Compression type: %s\n", compressionTypeName(compressionType));
 				break;
 			case CMP_ZLIB_RESOURCE_FORK:
-				printf("Compression type: ZLIB in resource fork (%u)\n", compressionType);
+				printf("Compression type: %s\n", compressionTypeName(compressionType));
+				break;
+			case CMP_LZVN_XATTR:
+				printf("Compression type: %s\n", compressionTypeName(compressionType));
+				break;
+			case CMP_LZVN_RESOURCE_FORK:
+				printf("Compression type: %s\n", compressionTypeName(compressionType));
+				break;
+			case CMP_LZFSE_XATTR:
+				printf("Compression type: %s\n", compressionTypeName(compressionType));
+				break;
+			case CMP_LZFSE_RESOURCE_FORK:
+				printf("Compression type: %s\n", compressionTypeName(compressionType));
 				break;
 			default:
 				printf("Unknown compression type: %u\n", compressionType);

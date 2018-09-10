@@ -22,6 +22,13 @@
 #include <sys/xattr.h>
 #include <hfs/hfs_format.h>
 
+#include <AvailabilityMacros.h>
+
+// not certain when the decmpfs.h header appeared, assume 10.11
+#ifndef MAC_OS_X_VERSION_10_11
+#   include "private/decmpfs.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif //__cplusplus
@@ -35,6 +42,10 @@ typedef enum compression_type { NONE, ZLIB, LZVN, LZFSE } compression_type;
  */
 #define CMP_ZLIB_XATTR				3	/* ZLIB-compressed data is stored in the xattr. */
 #define CMP_ZLIB_RESOURCE_FORK		4	/* ZLIB-compressed data is stored in the resource fork. */
+#define CMP_LZVN_XATTR				7	/* LZVN-compressed data is stored in the xattr. */
+#define CMP_LZVN_RESOURCE_FORK		8	/* LZVN-compressed data is stored in the resource fork. */
+#define CMP_LZFSE_XATTR				11	/* LZVN-compressed data is stored in the xattr. */
+#define CMP_LZFSE_RESOURCE_FORK		12	/* LZVN-compressed data is stored in the resource fork. */
 
 struct folder_info
 {

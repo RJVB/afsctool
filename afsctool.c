@@ -892,8 +892,29 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		goto bail;
 	}
 
+#if !__has_builtin(__builtin_available)
+#	warning "Please use clang 5 or newer if you can"
+	// determine the Darwin major version number
+	static int darwinMajor = 0;
+	if (darwinMajor == 0)
+	{
+		FILE *uname = popen("uname -r", "r");
+		if (uname)
+		{
+			fscanf(uname, "%d", &darwinMajor);
+			fprintf(stderr, "darwinMajor=%d\n", darwinMajor);
+		}
+	}
+#endif
+
 	bool removeResourceFork = false;
+	bool doSimpleDecompression = false;
 	switch (OSSwapLittleToHostInt32(resourceHeader->compression_type)) {
+		// ZLIB decompression is handled in what can be seen as a reference implementation
+		// that does the entire decompression explicitly in userland.
+		// There is also a simplified approach which exploits the fact that the kernel
+		// will decompress files transparently when reading their content. This approach
+		// is used for LZFN and LZFSE decompression.
 		// if (EndianU32_LtoN(*(UInt32 *) (indecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
 		case CMP_ZLIB_RESOURCE_FORK: {
 			if (inBuf == NULL)
@@ -1050,32 +1071,46 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			}
 			break;
 		}
-		case CMP_LZVN_XATTR: {
-			fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
-					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
-			xfree(outBuf);
-			goto bail;
-			break;
-		}
+		case CMP_LZVN_XATTR:
 		case CMP_LZVN_RESOURCE_FORK: {
-			fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
-					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
-			xfree(outBuf);
-			goto bail;
+	        if (
+#if __has_builtin(__builtin_available)
+				// we can do simplified runtime OS version detection: accept LZVN on 10.9 and up.
+				__builtin_available(macOS 10.9, *)
+#else
+				darwinMajor >= 13
+#endif
+			) {
+				doSimpleDecompression = true;
+			}
+			else
+			{
+				fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
+						inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
+				xfree(outBuf);
+				goto bail;
+			}
 			break;
 		}
-		case CMP_LZFSE_XATTR: {
-			fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
-					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
-			xfree(outBuf);
-			goto bail;
-			break;
-		}
+		case CMP_LZFSE_XATTR:
 		case CMP_LZFSE_RESOURCE_FORK: {
-			fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
-					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
-			xfree(outBuf);
-			goto bail;
+	        if (
+#if __has_builtin(__builtin_available)
+				// we can do simplified runtime OS version detection: accept LZFSE on 10.11 and up.
+				__builtin_available(macOS 10.11, *)
+#else
+				darwinMajor >= 15
+#endif
+			) {
+				doSimpleDecompression = true;
+			}
+			else
+			{
+				fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
+						inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
+				xfree(outBuf);
+				goto bail;
+			}
 			break;
 		}
 		default: {
@@ -1086,7 +1121,21 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			break;
 		}
 	}
-	
+
+	if (doSimpleDecompression)
+	{
+		// the simple approach: let the kernel handle decompression
+		errno = 0;
+		in = fopen(inFile, "r");
+		if (in && fread(outBuf, filesize, 1, in) != 1) {
+			fprintf(stderr, "%s: decompression failed: %s\n", inFile, strerror(errno));
+			fclose(in);
+			xfree(outBuf);
+			goto bail;
+		}
+		fclose(in);
+	}
+
 	if (chflags(inFile, (~UF_COMPRESSED) & inFileInfo->st_flags) < 0)
 	{
 		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
@@ -1516,20 +1565,14 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 			printf("File is HFS+/APFS compressed.\n");
 		switch (compressionType) {
 			case CMP_ZLIB_XATTR:
-				printf("Compression type: %s\n", compressionTypeName(compressionType));
-				break;
 			case CMP_ZLIB_RESOURCE_FORK:
 				printf("Compression type: %s\n", compressionTypeName(compressionType));
 				break;
 			case CMP_LZVN_XATTR:
-				printf("Compression type: %s\n", compressionTypeName(compressionType));
-				break;
 			case CMP_LZVN_RESOURCE_FORK:
 				printf("Compression type: %s\n", compressionTypeName(compressionType));
 				break;
 			case CMP_LZFSE_XATTR:
-				printf("Compression type: %s\n", compressionTypeName(compressionType));
-				break;
 			case CMP_LZFSE_RESOURCE_FORK:
 				printf("Compression type: %s\n", compressionTypeName(compressionType));
 				break;

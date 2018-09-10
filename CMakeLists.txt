@@ -9,15 +9,20 @@ option(HFSCOMPRESS_TO_ZFS
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules ${CMAKE_MODULE_PATH} )
 
 include(FeatureSummary)
+include(CheckIncludeFile)
 
 include(GetGitRevisionDescription)
 
 find_package(ZLIBP 1.2.8 REQUIRED)
 find_package(SPARSEHASH)
+check_include_file("sys/decmpfs.h" HAS_DECMPFS)
 
 include_directories(${ZLIBP_INCLUDE_DIR} ${SPARSEHASH_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_SOURCE_DIR})
 link_directories(${SPARSEHASH_LIBRARY})
 add_definitions(-DSUPPORT_PARALLEL)
+if(HAS_DECMPFS)
+    add_definitions(HAS_DECMPFS)
+endif()
 
 git_describe(GIT_FULL_VERSION "--tags")
 if(GIT_FULL_VERSION)

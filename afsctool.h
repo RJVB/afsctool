@@ -24,11 +24,10 @@
 
 #include <AvailabilityMacros.h>
 
-// not certain when the decmpfs.h header appeared, assume 10.11
-#ifndef MAC_OS_X_VERSION_10_11
-#   include "private/decmpfs.h"
-#else
+#ifdef HAS_DECMPFS
 #	include <sys/decmpfs.h>
+#else
+#   include "private/decmpfs.h"
 #endif
 
 #ifdef __cplusplus

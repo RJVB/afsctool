@@ -27,6 +27,8 @@
 // not certain when the decmpfs.h header appeared, assume 10.11
 #ifndef MAC_OS_X_VERSION_10_11
 #   include "private/decmpfs.h"
+#else
+#	include <Kernel/sys/decmpfs.h>
 #endif
 
 #ifdef __cplusplus

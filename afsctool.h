@@ -28,7 +28,7 @@
 #ifndef MAC_OS_X_VERSION_10_11
 #   include "private/decmpfs.h"
 #else
-#	include <Kernel/sys/decmpfs.h>
+#	include <sys/decmpfs.h>
 #endif
 
 #ifdef __cplusplus

@@ -563,7 +563,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 	// outBufBlock isn't needed anymore: deallocate here.
 	free(outBufBlock); outBufBlock = NULL;
-	
+
 	//if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
 	if (OSSwapLittleToHostInt32(resourceHeader->compression_type) == compressionType.resourceFork)
 	{
@@ -865,7 +865,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		}
 		xfree(xattrnames);
 	}
-	
+
 	if (indecmpfsBuf == NULL)
 	{
 		fprintf(stderr, "%s: Decompression failed; file flags indicate file is compressed but it does not have a com.apple.decmpfs extended attribute\n", inFile);
@@ -1142,7 +1142,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		xfree(outBuf);
 		goto bail;
 	}
-	
+
 	in = fopen(inFile, "r+");
 	if (in == NULL)
 	{
@@ -1152,7 +1152,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		xfree(outBuf);
 		goto bail;
 	}
-	
+
 	if (fwrite(outBuf, filesize, 1, in) != 1)
 	{
 		fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
@@ -1164,9 +1164,9 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		xfree(outBuf);
 		goto bail;
 	}
-	
+
 	fclose(in);
-	
+
 	if (removexattr(inFile, DECMPFS_XATTR_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 	{
 		fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));

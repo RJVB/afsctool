@@ -13,7 +13,11 @@
 #include <unistd.h>
 #include <libgen.h>
 #include <signal.h>
+
 #include <zlib.h>
+#ifdef HAS_LZVN
+#	include <FastCompression.h>
+#endif
 
 #include <sys/attr.h>
 
@@ -471,10 +475,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		utimes(inFile, times);
 		goto bail;
 	}
-	uLong zlib_EstimatedCompressedChunkSize;
+
 	struct compressionType {
 		UInt32 xattr, resourceFork;
 	} compressionType;
+	uLong zlib_EstimatedCompressedChunkSize;
+#ifdef HAS_LZVN
+	size_t lzvn_EstimatedCompressedChunkSize;
+	void *lzvn_WorkSpace = NULL;
+#endif
+
 	switch (comptype) {
 		case ZLIB: {
 			cmpedsize = zlib_EstimatedCompressedChunkSize = compressBound(compblksize);
@@ -482,6 +492,21 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			compressionType = t;
 			break;
 		}
+#ifdef HAS_LZVN
+		case LZVN: {
+			cmpedsize = lzvn_EstimatedCompressedChunkSize = MAX(lzvn_encode_work_size(), compblksize);
+			lzvn_WorkSpace = malloc(cmpedsize);
+			if (!lzvn_WorkSpace) {
+				fprintf(stderr, "%s: malloc error, unable to allocate %lu bytes for lzvn workspace (%s)\n",
+						inFile, cmpedsize, strerror(errno));
+				utimes(inFile, times);
+				goto bail;
+			}
+			struct compressionType t = {CMP_LZVN_XATTR, CMP_LZVN_RESOURCE_FORK};
+			compressionType = t;
+			break;
+		}
+#endif
 		default:
 			// noop
 			break;
@@ -518,7 +543,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	blockStart = outBuf + 0x104;
 	*(UInt32 *) blockStart = EndianU32_NtoL(numBlocks);
 	currBlock = blockStart + 0x4 + (numBlocks * 8);
-	for (inBufPos = 0; inBufPos < filesize; inBufPos += compblksize, currBlock += cmpedsize)
+	int blockNr;
+	for (inBufPos = 0, blockNr = 0; inBufPos < filesize; inBufPos += compblksize, currBlock += cmpedsize, ++blockNr)
 	{
 		void *cursor = inBuf + inBufPos;
 		uLong bytesAfterCursor = ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos;
@@ -532,6 +558,19 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 					goto bail;
 				}
 				break;
+#ifdef HAS_LZVN
+			case LZVN:
+				cmpedsize = lzvn_EstimatedCompressedChunkSize;
+				cmpedsize = lzvn_encode(outBufBlock, cmpedsize, cursor, bytesAfterCursor, lzvn_WorkSpace);
+
+				if (cmpedsize <= 0)
+				{
+					fprintf( stderr, "%s: lzvn compression failed on chunk #%d\n", inFile, blockNr);
+					utimes(inFile, times);
+					goto bail;
+				}
+				break;
+#endif
 			default:
 				// noop
 				break;
@@ -736,6 +775,9 @@ bail:
 	xfree(outBuf);
 	xfree(outdecmpfsBuf);
 	xfree(outBufBlock);
+#ifdef HAS_LZVN
+	xfree(lzvn_WorkSpace);
+#endif
 }
 
 void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile)
@@ -2073,7 +2115,7 @@ int afsctool (int argc, const char * argv[])
 	UInt16 big16;
 	UInt64 big64;
 	int nJobs = 0, nReverse = 0;
-	bool testQueue = false, sortQueue = false;
+	bool sortQueue = false;
 
 	folderinfo.filetypeslist = NULL;
 	folderinfo.filetypeslistlen = 0;
@@ -2242,7 +2284,7 @@ int afsctool (int argc, const char * argv[])
 						exit(EINVAL);
 					}
 					folderinfo.backup_file = backupFile = TRUE;
-				break;
+					break;
 #ifdef SUPPORT_PARALLEL
 				case 'j':
 				case 'J':
@@ -2259,7 +2301,6 @@ int afsctool (int argc, const char * argv[])
 					}
 					else if (argv[i][j] == 'T')
 					{
-						testQueue = true;
 					}
 					if (argv[i][j] == 'R')
 					{
@@ -2911,27 +2952,26 @@ next_arg:;
 		{
 			sortFilesInParallelProcessorBySize(PP);
 		}
-		if (!testQueue)
+		if (filesInParallelProcessor(PP))
 		{
-			if (filesInParallelProcessor(PP))
+			signal(SIGINT, signal_handler);
+			signal(SIGHUP, signal_handler);
+			fprintf( stderr, "Starting %d worker threads to process queue with %lu items\n",
+				nJobs, filesInParallelProcessor(PP) );
+			int processed = runParallelProcessor(PP);
+			fprintf( stderr, "Processed %d entries\n", processed );
+			if (printVerbose > 0)
 			{
-				signal(SIGINT, signal_handler);
-				signal(SIGHUP, signal_handler);
-				fprintf( stderr, "Starting %d worker threads to process queue with %lu items\n",
-					nJobs, filesInParallelProcessor(PP) );
-				int processed = runParallelProcessor(PP);
-				fprintf( stderr, "Processed %d entries\n", processed );
-				if (printVerbose > 0)
+				struct folder_info *fInfo = getParallelProcessorJobInfo(PP);
+				if (fInfo->num_files > 0)
 				{
-					struct folder_info *fInfo = getParallelProcessorJobInfo(PP);
-					if (fInfo->num_files > 0)
-					{
-						printFolderInfo( getParallelProcessorJobInfo(PP), hardLinkCheck );
-					}
+					printFolderInfo( getParallelProcessorJobInfo(PP), hardLinkCheck );
 				}
 			}
-			else
-				fprintf( stderr, "No compressable files found.\n" );
+		}
+		else
+		{
+			fprintf( stderr, "No compressable files found.\n" );
 		}
 		releaseParallelProcessor(PP);
 	}

@@ -46,7 +46,7 @@ Path=clang
 Type=Clang
 
 [Filters]
-size=25
+size=26
 
 [Filters][0]
 inclusive=0
@@ -137,6 +137,11 @@ targets=1
 inclusive=0
 pattern=afsctool-mp9-work
 targets=3
+
+[Filters][25]
+inclusive=0
+pattern=/build
+targets=2
 
 [Filters][3]
 inclusive=0

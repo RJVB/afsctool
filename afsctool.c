@@ -909,7 +909,8 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 
 	bool removeResourceFork = false;
 	bool doSimpleDecompression = false;
-	switch (OSSwapLittleToHostInt32(resourceHeader->compression_type)) {
+	int compressionType = OSSwapLittleToHostInt32(resourceHeader->compression_type);
+	switch (compressionType) {
 		// ZLIB decompression is handled in what can be seen as a reference implementation
 		// that does the entire decompression explicitly in userland.
 		// There is also a simplified approach which exploits the fact that the kernel
@@ -1086,7 +1087,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			else
 			{
 				fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
-						inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
+						inFile, compressionTypeName(compressionType));
 				xfree(outBuf);
 				goto bail;
 			}
@@ -1107,7 +1108,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			else
 			{
 				fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
-						inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
+						inFile, compressionTypeName(compressionType));
 				xfree(outBuf);
 				goto bail;
 			}
@@ -1115,7 +1116,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		}
 		default: {
 			fprintf(stderr, "%s: Decompression failed; unknown compression type %s\n",
-					inFile, compressionTypeName(OSSwapLittleToHostInt32(resourceHeader->compression_type)));
+					inFile, compressionTypeName(compressionType));
 			xfree(outBuf);
 			goto bail;
 			break;
@@ -1125,12 +1126,15 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 	if (doSimpleDecompression)
 	{
 		// the simple approach: let the kernel handle decompression
+		// by reading the file content using fread(), into outBuf.
+		// First, these can be freed already:
+		xfree(inBuf);
+		xfree(indecmpfsBuf);
 		errno = 0;
 		in = fopen(inFile, "r");
 		if (in && fread(outBuf, filesize, 1, in) != 1) {
 			fprintf(stderr, "%s: decompression failed: %s\n", inFile, strerror(errno));
 			fclose(in);
-			xfree(outBuf);
 			goto bail;
 		}
 		fclose(in);

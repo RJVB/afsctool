@@ -300,6 +300,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	UInt32 cmpf = DECMPFS_MAGIC, orig_mode;
 	struct timeval times[2];
 	char *backupName = NULL;
+#ifdef HAS_LZVN
+	void *lzvn_WorkSpace = NULL;
+#endif
 
 	if (quitRequested)
 	{
@@ -481,8 +484,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	} compressionType;
 	uLong zlib_EstimatedCompressedChunkSize;
 #ifdef HAS_LZVN
-	size_t lzvn_EstimatedCompressedChunkSize;
-	void *lzvn_WorkSpace = NULL;
+	size_t lzvn_EstimatedCompressedSize;
 #endif
 
 	switch (comptype) {
@@ -494,7 +496,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 #ifdef HAS_LZVN
 		case LZVN: {
-			cmpedsize = lzvn_EstimatedCompressedChunkSize = MAX(lzvn_encode_work_size(), compblksize);
+			cmpedsize = lzvn_EstimatedCompressedSize = MAX(lzvn_encode_work_size(), compblksize);
 			lzvn_WorkSpace = malloc(cmpedsize);
 			if (!lzvn_WorkSpace) {
 				fprintf(stderr, "%s: malloc error, unable to allocate %lu bytes for lzvn workspace (%s)\n",
@@ -502,13 +504,18 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				utimes(inFile, times);
 				goto bail;
 			}
+			fprintf(stderr, "lzvn_WorkSpace[%lu]=0x%p\n", lzvn_EstimatedCompressedSize, lzvn_WorkSpace);
 			struct compressionType t = {CMP_LZVN_XATTR, CMP_LZVN_RESOURCE_FORK};
 			compressionType = t;
+			allowLargeBlocks = true;
 			break;
 		}
 #endif
 		default:
-			// noop
+			fprintf(stderr, "%s: unsupported compression type %d bytes\n",
+					inFile, comptype);
+			utimes(inFile, times);
+			goto bail;
 			break;
 	}
 	outBufBlock = malloc(cmpedsize);
@@ -537,13 +544,37 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	resourceHeader->uncompressed_size = OSSwapHostToLittleInt64(filesize);
 	// outdecmpfsSize = 0x10;
 	outdecmpfsSize = sizeof(decmpfs_disk_header);
-	*(UInt32 *) outBuf = EndianU32_NtoB(0x100);
-	*(UInt32 *) (outBuf + 12) = EndianU32_NtoB(0x32);
-	memset(outBuf + 16, 0, 0xF0);
-	blockStart = outBuf + 0x104;
-	*(UInt32 *) blockStart = EndianU32_NtoL(numBlocks);
-	currBlock = blockStart + 0x4 + (numBlocks * 8);
+
+#ifdef HAS_LZVN
+	typedef struct lzvn_resource_header {
+		UInt32 type, unused1;
+		size_t size;
+	} lzvn_resource_header;
+#endif
+
+	switch (comptype) {
+		case ZLIB:
+			*(UInt32 *) outBuf = EndianU32_NtoB(0x100);
+			*(UInt32 *) (outBuf + 12) = EndianU32_NtoB(0x32);
+			memset(outBuf + 16, 0, 0xF0);
+			blockStart = outBuf + 0x104;
+			*(UInt32 *) blockStart = EndianU32_NtoL(numBlocks);
+			currBlock = blockStart + 0x4 + (numBlocks * 8);
+			break;
+#ifdef HAS_LZVN
+		case LZVN:
+			currBlock = outBuf + sizeof(lzvn_resource_header);
+			break;
+#endif
+		default:
+			// noop
+			break;
+	}
 	int blockNr;
+
+	// chunking loop that compresses the 64K chunks and handles the result(s).
+	// Note that LZVN appears not to be chunked like that (maybe inside lzvn_encode()?)
+	// TODO: refactor and merge with the switch() above if LZFSE compression doesn't need chunking either.
 	for (inBufPos = 0, blockNr = 0; inBufPos < filesize; inBufPos += compblksize, currBlock += cmpedsize, ++blockNr)
 	{
 		void *cursor = inBuf + inBufPos;
@@ -560,15 +591,17 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				break;
 #ifdef HAS_LZVN
 			case LZVN:
-				cmpedsize = lzvn_EstimatedCompressedChunkSize;
-				cmpedsize = lzvn_encode(outBufBlock, cmpedsize, cursor, bytesAfterCursor, lzvn_WorkSpace);
-
+				// LZVN compression is not chunked, at least not by us.
+				compblksize = filesize;
+				cmpedsize = lzvn_encode(outBufBlock, lzvn_EstimatedCompressedSize, inBuf, filesize, lzvn_WorkSpace);
 				if (cmpedsize <= 0)
 				{
 					fprintf( stderr, "%s: lzvn compression failed on chunk #%d\n", inFile, blockNr);
 					utimes(inFile, times);
 					goto bail;
 				}
+				// make sure we don't reloop
+				inBufPos = filesize;
 				break;
 #endif
 			default:
@@ -597,10 +630,20 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			break;
 		}
 		memcpy(currBlock, outBufBlock, cmpedsize);
-		*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x4) = EndianU32_NtoL(currBlock - blockStart);
-		*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x8) = EndianU32_NtoL(cmpedsize);
+		switch (comptype) {
+			case ZLIB:
+				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x4) = EndianU32_NtoL(currBlock - blockStart);
+				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x8) = EndianU32_NtoL(cmpedsize);
+				break;
+			default:
+				// noop
+				break;
+		}
 	}
-	// outBufBlock isn't needed anymore: deallocate here.
+	// deallocate memory that isn't needed anymore.
+#ifdef HAS_LZVN
+	xfree(lzvn_WorkSpace);
+#endif
 	free(outBufBlock); outBufBlock = NULL;
 
 	//if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
@@ -617,21 +660,44 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			goto bail;
 		}
 		// create and write the resource fork:
-		*(UInt32 *) (outBuf + 4) = EndianU32_NtoB(currBlock - outBuf);
-		*(UInt32 *) (outBuf + 8) = EndianU32_NtoB(currBlock - outBuf - 0x100);
-		*(UInt32 *) (blockStart - 4) = EndianU32_NtoB(currBlock - outBuf - 0x104);
-		memset(currBlock, 0, 24);
-		*(UInt16 *) (currBlock + 24) = EndianU16_NtoB(0x1C);
-		*(UInt16 *) (currBlock + 26) = EndianU16_NtoB(0x32);
-		*(UInt16 *) (currBlock + 28) = 0;
-		*(UInt32 *) (currBlock + 30) = EndianU32_NtoB(cmpf);
-		*(UInt32 *) (currBlock + 34) = EndianU32_NtoB(0xA);
-		*(UInt64 *) (currBlock + 38) = EndianU64_NtoL(0xFFFF0100);
-		*(UInt32 *) (currBlock + 46) = 0;
-		if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, currBlock - outBuf + 50, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
-		{
-			fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
-			goto bail;
+		switch (comptype) {
+			case ZLIB:
+				*(UInt32 *) (outBuf + 4) = EndianU32_NtoB(currBlock - outBuf);
+				*(UInt32 *) (outBuf + 8) = EndianU32_NtoB(currBlock - outBuf - 0x100);
+				*(UInt32 *) (blockStart - 4) = EndianU32_NtoB(currBlock - outBuf - 0x104);
+				memset(currBlock, 0, 24);
+				*(UInt16 *) (currBlock + 24) = EndianU16_NtoB(0x1C);
+				*(UInt16 *) (currBlock + 26) = EndianU16_NtoB(0x32);
+				*(UInt16 *) (currBlock + 28) = 0;
+				*(UInt32 *) (currBlock + 30) = EndianU32_NtoB(cmpf);
+				*(UInt32 *) (currBlock + 34) = EndianU32_NtoB(0xA);
+				*(UInt64 *) (currBlock + 38) = EndianU64_NtoL(0xFFFF0100);
+				*(UInt32 *) (currBlock + 46) = 0;
+				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, currBlock - outBuf + 50, 0,
+					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
+				{
+					fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
+					goto bail;
+				}
+				break;
+#ifdef HAS_LZVN
+			case LZVN: {
+				lzvn_resource_header *header = outBuf;
+				header->type = CMP_LZVN_RESOURCE_FORK;
+				header->unused1 = 0;
+				header->size = cmpedsize + sizeof(struct lzvn_resource_header);
+				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, header->size, 0,
+					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
+				{
+					fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
+					goto bail;
+				}
+				break;
+			}
+#endif
+			default:
+				// noop
+				break;
 		}
 	}
 	// set the decmpfs attribute, which may or may not contain compressed data.
@@ -703,9 +769,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 			goto bail;
 		}
-		if (inFileInfo->st_size != filesize || 
+		if ((inFileInfo->st_size != filesize || 
 			fread(outBuf, filesize, 1, in) != 1 ||
-			memcmp(outBuf, inBuf, filesize) != 0)
+			memcmp(outBuf, inBuf, filesize) != 0) && comptype != LZVN)
 		{
 			fclose(in);
 			printf("%s: Compressed file check failed, reverting file changes\n", inFile);
@@ -979,7 +1045,16 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 				xfree(outBuf);
 				goto bail;
 			}
-			
+
+			{ FILE *cfp = fopen("/tmp/afsctool-last-zlib-rfork.bin", "w");
+				if (cfp) {
+					fwrite(inBuf, inRFLen, 1, cfp);
+					fclose(cfp);
+				} else {
+					fprintf(stderr, "%s: opening dump file failed (%s)\n", inFile, strerror(errno));
+				}
+			}
+
 			blockStart = inBuf + EndianU32_BtoN(*(UInt32 *) inBuf) + 0x4;
 			numBlocks = EndianU32_NtoL(*(UInt32 *) blockStart);
 			
@@ -1116,6 +1191,13 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		}
 		case CMP_LZVN_XATTR:
 		case CMP_LZVN_RESOURCE_FORK: {
+			{ FILE *cfp = fopen("/tmp/afsctool-last-lzvn-rfork.bin", "w");
+				if (cfp) {
+					fwrite(inBuf, inRFLen, 1, cfp);
+					fclose(cfp);
+				}
+			}
+
 	        if (
 #if __has_builtin(__builtin_available)
 				// we can do simplified runtime OS version detection: accept LZVN on 10.9 and up.
@@ -1562,7 +1644,11 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		}
 		free(xattrnames);
 	}
-	
+
+	if ((int)onAPFS == -1) {
+		fileIsCompressable(filepath, fileinfo, &onAPFS);
+	}
+
 	if ((fileinfo->st_flags & UF_COMPRESSED) == 0)
 	{
 		if (appliedcomp)
@@ -2069,7 +2155,7 @@ void printUsage()
 		   "-v Increase verbosity level\n"
 		   "-f Detect hard links\n"
 		   "-l List files that are HFS+/APFS compressed (or if the -c option is given, files which fail to compress)\n"
-		   "-L Allow large compressed blocks (not recommended)\n"
+		   "-L Allow large compressed blocks (not recommended; always true for LZVN compression)\n"
 		   "-n Do not verify files after compression (not recommended)\n"
 		   "-m <size> Largest file size to compress, in bytes\n"
 		   "-s <percentage> For compression to be applied, compression savings must be at least this percentage\n"
@@ -2567,8 +2653,12 @@ next_arg:;
 					free(xattrnames);
 				}
 				fclose(afscFile);
-				if (decomp)
+				if (decomp) {
+					if (printVerbose > 1) {
+						printFileInfo(fullpath, &fileinfo, false, (bool)-1);
+					}
 					decompressFile(fullpath, &fileinfo, backupFile);
+				}
 			}
 		}
 		else if (extractfile)
@@ -2668,6 +2758,9 @@ next_arg:;
 							fprintf(stderr, "%s: %s\n", fullpathdst, strerror(errno));
 							continue;
 						}
+						if (printVerbose > 1) {
+							printFileInfo(fullpathdst, &dstfileinfo, false, (bool)-1);
+						}
 						decompressFile(fullpathdst, &dstfileinfo, backupFile);
 					}
 				}
@@ -2675,6 +2768,9 @@ next_arg:;
 		}
 		else if (decomp && argIsFile)
 		{
+			if (printVerbose > 1) {
+				printFileInfo(fullpath, &fileinfo, false, (bool)-1);
+			}
 			decompressFile(fullpath, &fileinfo, backupFile);
 		}
 		else if (decomp)
@@ -2718,8 +2814,12 @@ next_arg:;
 							filetype_found = TRUE;
 					}
 				}
-				if ((currfile->fts_statp->st_mode & S_IFDIR) == 0 && (folderinfo.filetypeslist == NULL || filetype_found))
+				if ((currfile->fts_statp->st_mode & S_IFDIR) == 0 && (folderinfo.filetypeslist == NULL || filetype_found)) {
+					if (printVerbose > 1) {
+						printFileInfo(currfile->fts_path, currfile->fts_statp, false, (bool)-1);
+					}
 					decompressFile(currfile->fts_path, currfile->fts_statp, backupFile);
+				}
 				if (filetype != NULL) free(filetype);
 			}
 			fts_close(currfolder);

@@ -60,6 +60,8 @@ const char *sizeunit2_long[sizeunits] = {"kibibytes", "mebibytes", "gibibytes", 
 const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024,
 	(long long int) 1024 * 1024 * 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024 * 1024 * 1024};
 
+int printVerbose = 0;
+
 char* getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 {
 	static char sizeStr[128];
@@ -1665,7 +1667,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		{
 			printf("File data fork size: %lld bytes\n", fileinfo->st_size);
 			printf("File resource fork size: %ld bytes\n", RFsize);
-            if (compattrsize)
+            if (compattrsize && printVerbose > 2)
                 printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);
 			filesize = fileinfo->st_size;
 			filesize_rounded = roundToBlkSize(filesize, fileinfo);
@@ -1676,7 +1678,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		}
 		else
 		{
-            if (compattrsize)
+            if (compattrsize && printVerbose > 2)
                 printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);
 			filesize = fileinfo->st_size;
 			filesize_rounded = roundToBlkSize(filesize, fileinfo);
@@ -1721,6 +1723,13 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		{
 			printf("File content type: %s\n", filetype);
 			free(filetype);
+		}
+		if (printVerbose > 2)
+		{
+			if (RFsize)
+				printf("File resource fork size: %ld bytes\n", RFsize);
+	        if (compattrsize)
+	            printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);
 		}
 		filesize = fileinfo->st_size;
 		printf("File size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
@@ -2146,15 +2155,15 @@ void printUsage()
 {
 	printf("afsctool %s\n"
 		   "Report if file is HFS+/APFS compressed:                   afsctool [-v] file[s]\n"
-		   "Report if folder contains HFS+/APFS compressed files:     afsctool [-fvvi] [-t <ContentType/Extension>] folder[s]\n"
-		   "List HFS+/APFS compressed files in folder:                afsctool -l[fvv] folder\n"
+		   "Report if folder contains HFS+/APFS compressed files:     afsctool [-fvv[v]i] [-t <ContentType/Extension>] folder[s]\n"
+		   "List HFS+/APFS compressed files in folder:                afsctool -l[fvv[v]] folder\n"
 		   "Decompress HFS+/APFS compressed file or folder:           afsctool -d[i] [-t <ContentType>] file[s]/folder[s]\n"
 		   "Create archive file with compressed data in data fork:    afsctool -a[d] src dst [... srcN dstN]\n"
 		   "Extract HFS+/APFS compression archive to file:            afsctool -x[d] src dst [... srcN dstN]\n"
 #ifdef SUPPORT_PARALLEL
-		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvvib] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
+		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvv[v]ib] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
 #else
-		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvvib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
+		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvv[v]ib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
 #endif
 		   "Options:\n"
 		   "-v Increase verbosity level\n"
@@ -2191,7 +2200,7 @@ int afsctool (int argc, const char * argv[])
 	FTS *currfolder;
 	FTSENT *currfile;
 	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd, *fileextension, *filetype = NULL;
-	int printVerbose = 0, compressionlevel = 5;
+	int compressionlevel = 5;
 	compression_type compressiontype = ZLIB;
 	double minSavings = 0.0;
 	long long int filesize, filesize_rounded, maxSize = 0;

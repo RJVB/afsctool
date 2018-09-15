@@ -528,9 +528,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 	// The header of the compression resource fork (16 bytes):
 	// compression magic number
-	decmpfs_disk_header *resourceHeader = (decmpfs_disk_header*) outdecmpfsBuf;
+	decmpfs_disk_header *decmpfsAttr = (decmpfs_disk_header*) outdecmpfsBuf;
 	// *(UInt32 *) outdecmpfsBuf = EndianU32_NtoL(cmpf);
-	resourceHeader->compression_magic = OSSwapHostToLittleInt32(cmpf);
+	decmpfsAttr->compression_magic = OSSwapHostToLittleInt32(cmpf);
 	// the compression type: 4 == compressed data in the resource fork.
 	// FWIW, libarchive has the following comment in archive_write_disk_posix.c :
 	//* If the compressed size is smaller than MAX_DECMPFS_XATTR_SIZE [3802]
@@ -538,10 +538,10 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	//* data to decmpfs xattr instead of the resource fork.
 	// We do the same below.
 	// *(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.resourceFork);
-	resourceHeader->compression_type = OSSwapHostToLittleInt32(compressionType.resourceFork);
+	decmpfsAttr->compression_type = OSSwapHostToLittleInt32(compressionType.resourceFork);
 	// the uncompressed filesize
 	// *(UInt64 *) (outdecmpfsBuf + 8) = EndianU64_NtoL(filesize);
-	resourceHeader->uncompressed_size = OSSwapHostToLittleInt64(filesize);
+	decmpfsAttr->uncompressed_size = OSSwapHostToLittleInt64(filesize);
 	// outdecmpfsSize = 0x10;
 	outdecmpfsSize = sizeof(decmpfs_disk_header);
 
@@ -624,7 +624,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		{
 			// store in directly into the attribute instead of using the resource fork.
 			// *(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.xattr);
-			resourceHeader->compression_type = OSSwapHostToLittleInt32(compressionType.xattr);
+			decmpfsAttr->compression_type = OSSwapHostToLittleInt32(compressionType.xattr);
 			memcpy(outdecmpfsBuf + outdecmpfsSize, outBufBlock, cmpedsize);
 			outdecmpfsSize += cmpedsize;
 			break;
@@ -647,7 +647,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	free(outBufBlock); outBufBlock = NULL;
 
 	//if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
-	if (OSSwapLittleToHostInt32(resourceHeader->compression_type) == compressionType.resourceFork)
+	if (OSSwapLittleToHostInt32(decmpfsAttr->compression_type) == compressionType.resourceFork)
 	{
 		if ((((double) (currBlock - outBuf + outdecmpfsSize + 50) / filesize) >= (1.0 - minSavings / 100) && minSavings != 0.0) ||
 			currBlock - outBuf + outdecmpfsSize + 50 >= filesize)
@@ -985,9 +985,9 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		goto bail;
 	}
 
-	decmpfs_disk_header *resourceHeader = (decmpfs_disk_header*) indecmpfsBuf;
+	decmpfs_disk_header *decmpfsAttr = (decmpfs_disk_header*) indecmpfsBuf;
 	// filesize = EndianU64_LtoN(*(UInt64 *) (indecmpfsBuf + 8));
-	filesize = OSSwapLittleToHostInt64(resourceHeader->uncompressed_size);
+	filesize = OSSwapLittleToHostInt64(decmpfsAttr->uncompressed_size);
 	if (filesize == 0)
 	{
 		fprintf(stderr, "%s: Decompression failed; file size given in header is 0\n", inFile);
@@ -1017,7 +1017,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 
 	bool removeResourceFork = false;
 	bool doSimpleDecompression = false;
-	int compressionType = OSSwapLittleToHostInt32(resourceHeader->compression_type);
+	int compressionType = OSSwapLittleToHostInt32(decmpfsAttr->compression_type);
 	switch (compressionType) {
 		// ZLIB decompression is handled in what can be seen as a reference implementation
 		// that does the entire decompression explicitly in userland.
@@ -1262,6 +1262,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			goto bail;
 		}
 		fclose(in);
+		removeResourceFork = true;
 	}
 
 	if (chflags(inFile, (~UF_COMPRESSED) & inFileInfo->st_flags) < 0)
@@ -1664,6 +1665,8 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		{
 			printf("File data fork size: %lld bytes\n", fileinfo->st_size);
 			printf("File resource fork size: %ld bytes\n", RFsize);
+            if (compattrsize)
+                printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);
 			filesize = fileinfo->st_size;
 			filesize_rounded = roundToBlkSize(filesize, fileinfo);
 			filesize += RFsize;
@@ -1673,6 +1676,8 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		}
 		else
 		{
+            if (compattrsize)
+                printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);
 			filesize = fileinfo->st_size;
 			filesize_rounded = roundToBlkSize(filesize, fileinfo);
 			printf("File data fork size (reported size by Mac OS X Finder): %s\n",

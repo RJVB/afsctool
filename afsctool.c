@@ -292,19 +292,20 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	FILE *in;
 	// 64Kb block size (HFS compression is "64K chunked")
-	unsigned int compblksize = 0x10000;
+	int compblksize = 0x10000;
 	unsigned int numBlocks, outdecmpfsSize = 0;
 	void *inBuf = NULL, *outBuf = NULL, *outBufBlock = NULL, *outdecmpfsBuf = NULL, *currBlock = NULL, *blockStart = NULL;
 	long long int inBufPos, filesize = inFileInfo->st_size;
 	unsigned long int cmpedsize;
 	char *xattrnames, *curr_attr;
-	ssize_t xattrnamesize;
+	ssize_t xattrnamesize, outBufSize = 0;
 	UInt32 cmpf = DECMPFS_MAGIC, orig_mode;
 	struct timeval times[2];
 	char *backupName = NULL;
 #ifdef HAS_LZVN
 	void *lzvn_WorkSpace = NULL;
 #endif
+	bool supportsLargeBlocks;
 
 	if (quitRequested)
 	{
@@ -465,14 +466,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 #endif
 
-	outBuf = malloc(filesize + 0x13A + (numBlocks * 9));
-	if (outBuf == NULL)
-	{
-		fprintf(stderr, "%s: malloc error, unable to allocate output buffer of %lld bytes (%s)\n",
-				inFile, filesize + 0x13A + (numBlocks * 9), strerror(errno));
-		utimes(inFile, times);
-		goto bail;
-	}
 	outdecmpfsBuf = malloc(3802);
 	if (outdecmpfsBuf == NULL)
 	{
@@ -494,6 +487,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			cmpedsize = zlib_EstimatedCompressedChunkSize = compressBound(compblksize);
 			struct compressionType t = {CMP_ZLIB_XATTR, CMP_ZLIB_RESOURCE_FORK};
 			compressionType = t;
+			outBufSize = filesize + 0x13A + (numBlocks * 9);
+			outBuf = malloc(outBufSize);
 			break;
 		}
 #ifdef HAS_LZVN
@@ -509,7 +504,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			fprintf(stderr, "lzvn_WorkSpace[%lu]=0x%p\n", lzvn_EstimatedCompressedSize, lzvn_WorkSpace);
 			struct compressionType t = {CMP_LZVN_XATTR, CMP_LZVN_RESOURCE_FORK};
 			compressionType = t;
-			allowLargeBlocks = true;
+			// not known yet
+			outBufSize = 0;
 			break;
 		}
 #endif
@@ -520,6 +516,15 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			goto bail;
 			break;
 	}
+
+	if (outBuf == NULL && outBufSize != 0)
+	{
+		fprintf(stderr, "%s: malloc error, unable to allocate output buffer of %lu bytes (%s)\n",
+				inFile, outBufSize, strerror(errno));
+		utimes(inFile, times);
+		goto bail;
+	}
+
 	outBufBlock = malloc(cmpedsize);
 	if (outBufBlock == NULL)
 	{
@@ -548,12 +553,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	outdecmpfsSize = sizeof(decmpfs_disk_header);
 
 #ifdef HAS_LZVN
-	typedef struct lzvn_resource_header {
-		UInt32 type, unused1;
-		size_t size;
+	typedef struct __attribute__((packed)) lzvn_resource_header {
+		UInt32 type;
+		UInt32 size;
 	} lzvn_resource_header;
 #endif
 
+	unsigned long currBlockLen, currBlockOffset;
 	switch (comptype) {
 		case ZLIB:
 			*(UInt32 *) outBuf = EndianU32_NtoB(0x100);
@@ -562,10 +568,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			blockStart = outBuf + 0x104;
 			*(UInt32 *) blockStart = EndianU32_NtoL(numBlocks);
 			currBlock = blockStart + 0x4 + (numBlocks * 8);
+			currBlockLen = outBufSize - (currBlock - outBuf);
+			supportsLargeBlocks = true;
 			break;
 #ifdef HAS_LZVN
 		case LZVN:
-			currBlock = outBuf + sizeof(lzvn_resource_header);
+			supportsLargeBlocks = false;
 			break;
 #endif
 		default:
@@ -577,7 +585,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	// chunking loop that compresses the 64K chunks and handles the result(s).
 	// Note that LZVN appears not to be chunked like that (maybe inside lzvn_encode()?)
 	// TODO: refactor and merge with the switch() above if LZFSE compression doesn't need chunking either.
-	for (inBufPos = 0, blockNr = 0; inBufPos < filesize; inBufPos += compblksize, currBlock += cmpedsize, ++blockNr)
+	for (inBufPos = 0, blockNr = 0, currBlockOffset = 0
+		; inBufPos < filesize
+		; inBufPos += compblksize, currBlock += cmpedsize, currBlockOffset += cmpedsize, ++blockNr)
 	{
 		void *cursor = inBuf + inBufPos;
 		uLong bytesAfterCursor = ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos;
@@ -594,14 +604,25 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 #ifdef HAS_LZVN
 			case LZVN:
 				// LZVN compression is not chunked, at least not by us.
-				compblksize = filesize;
-				cmpedsize = lzvn_encode(outBufBlock, lzvn_EstimatedCompressedSize, inBuf, filesize, lzvn_WorkSpace);
+				currBlockLen = cmpedsize =
+					lzvn_encode(outBufBlock, lzvn_EstimatedCompressedSize, inBuf, filesize, lzvn_WorkSpace);
 				if (cmpedsize <= 0)
 				{
 					fprintf( stderr, "%s: lzvn compression failed on chunk #%d\n", inFile, blockNr);
 					utimes(inFile, times);
 					goto bail;
 				}
+				// reuse the compression buffer because it has the exact length required
+				// (or at least a sufficient length).
+				outBufSize = cmpedsize + sizeof(lzvn_resource_header);
+				if (!(outBuf = malloc(outBufSize)))
+				{
+					fprintf(stderr, "%s: malloc error, unable to allocate output buffer of %lu bytes (%s)\n",
+							inFile, outBufSize, strerror(errno));
+					utimes(inFile, times);
+					goto bail;
+				}
+				currBlock = outBuf + sizeof(lzvn_resource_header);
 				// make sure we don't reloop
 				inBufPos = filesize;
 				break;
@@ -610,7 +631,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				// noop
 				break;
 		}
-		if (cmpedsize > (((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos))
+		if (supportsLargeBlocks && cmpedsize > (((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos))
 		{
 			if (!allowLargeBlocks && (((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos) == compblksize)
 			{
@@ -631,7 +652,14 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			outdecmpfsSize += cmpedsize;
 			break;
 		}
-		memcpy(currBlock, outBufBlock, cmpedsize);
+		if (currBlockOffset + cmpedsize <= currBlockLen) {
+			memcpy(currBlock, outBufBlock, cmpedsize);
+		} else {
+			fprintf( stderr, "%s: result buffer overrun at chunk #%d (%lu >= %lu)\n", inFile, blockNr,
+				currBlockOffset + cmpedsize, currBlockLen);
+			utimes(inFile, times);
+			goto bail;
+		}
 		switch (comptype) {
 			case ZLIB:
 				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x4) = EndianU32_NtoL(currBlock - blockStart);
@@ -686,7 +714,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			case LZVN: {
 				lzvn_resource_header *header = outBuf;
 				header->type = CMP_LZVN_RESOURCE_FORK;
-				header->unused1 = 0;
 				header->size = cmpedsize + sizeof(struct lzvn_resource_header);
 				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, header->size, 0,
 					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
@@ -2161,9 +2188,9 @@ void printUsage()
 		   "Create archive file with compressed data in data fork:    afsctool -a[d] src dst [... srcN dstN]\n"
 		   "Extract HFS+/APFS compression archive to file:            afsctool -x[d] src dst [... srcN dstN]\n"
 #ifdef SUPPORT_PARALLEL
-		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvv[v]ib] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
+		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvv[v]ib] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] [-T compressor] file[s]/folder[s]\n\n"
 #else
-		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvv[v]ib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] file[s]/folder[s]\n\n"
+		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvv[v]ib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] [-T compressor] file[s]/folder[s]\n\n"
 #endif
 		   "Options:\n"
 		   "-v Increase verbosity level\n"
@@ -2183,7 +2210,8 @@ void printUsage()
 		   "-S sort the item list by file size (leaving the largest files to the end may be beneficial if the target volume is almost full)\n"
 		   "-RM <M> of the <N> workers will work the item list (must be sorted!) in reverse order, starting with the largest files\n"
 #endif
-		   "-<level> Compression level to use when compressing (ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n"
+		   "-T <compressor> Compression type to use: ZLIB (= types 3,4) or LZVN (= types 7,8)\n"
+		   "-<level> Compression level to use when compressing (ZLIB only; ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n"
 		  , AFSCTOOL_FULL_VERSION_STRING);
 }
 
@@ -2226,7 +2254,7 @@ int afsctool (int argc, const char * argv[])
 		printUsage();
 		exit(EINVAL);
 	}
-	
+
 	for (i = 1; i < argc && argv[i][0] == '-'; i++)
 	{
 		for (j = 1; j < strlen(argv[i]); j++)
@@ -2369,6 +2397,24 @@ int afsctool (int argc, const char * argv[])
 					folderinfo.filetypeslist[folderinfo.filetypeslistlen++] = (char *) argv[i];
 					j = strlen(argv[i]) - 1;
 					break;
+				case 'T':
+					if (j + 1 < strlen(argv[i]) || i + 2 > argc)
+					{
+						printUsage();
+						exit(EINVAL);
+					}
+					i++;
+					if (strcasecmp(argv[i], "zlib") == 0) {
+						compressiontype = ZLIB;
+					} else if (strcasecmp(argv[i], "lzvn") == 0) {
+						compressiontype = LZVN;
+					} else {
+						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
+						printUsage();
+						exit(EINVAL);
+					}
+					j = strlen(argv[i]) - 1;
+					break;
 				case 'i':
 					if (createfile || extractfile)
 					{
@@ -2388,7 +2434,6 @@ int afsctool (int argc, const char * argv[])
 #ifdef SUPPORT_PARALLEL
 				case 'j':
 				case 'J':
-				case 'T':
 				case 'R':
 					if (!applycomp)
 					{
@@ -2398,9 +2443,6 @@ int afsctool (int argc, const char * argv[])
 					if (argv[i][j] == 'J')
 					{
 						exclusive_io = false;
-					}
-					else if (argv[i][j] == 'T')
-					{
 					}
 					if (argv[i][j] == 'R')
 					{

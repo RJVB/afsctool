@@ -48,6 +48,10 @@ Version 1.6.9 introduces two new options for the parallel compression mode:
   first. This may be beneficial to help limit (free space) fragmentation (if that's
   the goal, using a single worker thread is probably best).
 
+Version 1.7 introduces support for other compression types as added by Apple in OS X 10.9
+and later. Currently only LZVN support is fully implemented (though decompression of LZFSE
+should work if the OS supports it).
+
 ### Installation
 
 afsctool depends on zlib (v1.2.8 or newer) and Google's sparsehash library and on CMake

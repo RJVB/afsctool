@@ -55,19 +55,19 @@ should work if the OS supports it).
 ### Installation
 
 afsctool depends on zlib (v1.2.8 or newer) and Google's sparsehash library and on CMake
-for building. The OS zlib copy may be recent enough (it is on 10.12 and later) but to be
+and pkgconfig for building. The OS zlib copy may be recent enough (it is on 10.12 and later) but to be
 certain to obtain the latest versions of both, use a package manager like MacPorts, Fink
 or HomeBrew. Be sure to follow the general installation and usage instructions for those
 projects, in particular how to update your PATH.
 
 # using MacPorts:
 ```shell
-port install sparsehash zlib cmake
+port install sparsehash zlib cmake pkgconfig
 ```
 
 # using HomeBrew:
 ```shell
-brew install google-sparsehash zlib cmake
+brew install google-sparsehash zlib cmake pkgconfig
 PKG_CONFIG_PATH=/usr/local/opt/zlib/lib/pkgconfig
 ```
 (Setting PKG_CONFIG_PATH is only required with HomeBrew.)

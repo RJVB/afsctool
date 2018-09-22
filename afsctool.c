@@ -884,6 +884,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				fprintf(stderr, "\ta backup is available as %s\n", backupName);
 				xfree(backupName);
 			}
+			fclose(in);
 			goto bail;
 		}
 		fclose(in);
@@ -891,7 +892,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		goto bail;
 	}
 // 	fclose(in); in = NULL;
-	fsync(fdIn);
+// 	fsync(fdIn);
 	close(fdIn);
 #else
 	int fdIn;
@@ -914,12 +915,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		bool sizeMismatch = false, readFailure = false, contentMismatch = false;
 		ssize_t checkRead= -2;
-		if ((sizeMismatch = inFileInfo->st_size != filesize) || 
-			(readFailure = (checkRead = read(fdIn, outBuf, filesize)) != filesize) ||
+		readFailure = (checkRead = read(fdIn, outBuf, filesize)) != filesize;
+		close(fdIn);
+		if ((sizeMismatch = inFileInfo->st_size != filesize) ||
+			readFailure ||
 			(contentMismatch = memcmp(outBuf, inBuf, filesize) != 0))
 		{
 fail:;
-			close(fdIn);
 			printf("%s: Compressed file check failed, reverting file changes\n", inFile);
 			fprintf(stderr, "\tsize mismatch=%d read=%zd failure=%d content mismatch=%d\n",
 				sizeMismatch, checkRead, readFailure, contentMismatch);

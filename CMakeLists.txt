@@ -81,7 +81,7 @@ endif()
 if(APPLE)
     target_link_libraries(afsctool "-framework CoreServices")
 else()
-    target_link_libraries(afsctool "-lrt -ldl -pthread")
+    target_link_libraries(afsctool "-lrt -ldl -lbsd -pthread")
 endif()
 
 install(TARGETS afsctool DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)

@@ -61,6 +61,7 @@ const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 102
 	(long long int) 1024 * 1024 * 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024 * 1024 * 1024};
 
 int printVerbose = 0;
+void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp, bool onAPFS);
 
 char* getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 {
@@ -482,10 +483,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 #ifdef HAS_LZVN
 	size_t lzvn_EstimatedCompressedSize;
 
-	// LZVN decmpfs compression starts with a table of 4-byte offsets into the resource
-	// fork, terminated with the offset where no more compressed data is to be found.
-	// The first offset is thus also sizeof(UInt32) (4) times the size of the table.
-	typedef UInt32 lzvn_chunk_table;
 	lzvn_chunk_table *chunkTable = (lzvn_chunk_table*) outBuf;
 	ssize_t chunkTableByteSize;
 #endif
@@ -495,7 +492,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			cmpedsize = zlib_EstimatedCompressedChunkSize = compressBound(compblksize);
 			struct compressionType t = {CMP_ZLIB_XATTR, CMP_ZLIB_RESOURCE_FORK};
 			compressionType = t;
+   #define ZLIB_SINGLESHOT_OUTBUF
+#ifdef ZLIB_SINGLESHOT_OUTBUF
 			outBufSize = filesize + 0x13A + (numBlocks * 9);
+#else
+			outBufSize = 0x104 + sizeof(UInt32) + numBlocks * 8;
+#endif
+#define SET_BLOCKSTART()	blockStart = outBuf + 0x104
 			outBuf = malloc(outBufSize);
 			break;
 		}
@@ -571,9 +574,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			*(UInt32 *) outBuf = EndianU32_NtoB(0x100);
 			*(UInt32 *) (outBuf + 12) = EndianU32_NtoB(0x32);
 			memset(outBuf + 16, 0, 0xF0);
-			blockStart = outBuf + 0x104;
+			SET_BLOCKSTART();
+			// block table: numBlocks + offset,blocksize pairs for each of the blocks
 			*(UInt32 *) blockStart = EndianU32_NtoL(numBlocks);
-			currBlock = blockStart + 0x4 + (numBlocks * 8);
+			// actual compressed data starts after the block table
+			currBlock = blockStart + sizeof(UInt32) + (numBlocks * 8);
 			currBlockLen = outBufSize - (currBlock - outBuf);
 			supportsLargeBlocks = true;
 			break;
@@ -606,6 +611,30 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 					utimes(inFile, times);
 					goto bail;
 				}
+#ifndef ZLIB_SINGLESHOT_OUTBUF
+				if (currBlockOffset == 0) {
+					currBlockOffset = outBufSize;
+				} 
+				outBufSize += cmpedsize;
+// 				fprintf(stderr, "\tchunk #%d from %lu input bytes: increasing outBuf %p by %lu to %zd bytes\n"
+// 						"\tblockStart=%p currBlock=%p outdecmpfsBuf=%p magic=%p\n",
+// 						blockNr, bytesAfterCursor, outBuf, cmpedsize, outBufSize, blockStart, currBlock,
+// 						outdecmpfsBuf, OSSwapLittleToHostInt32(decmpfsAttr->compression_magic));
+				if (!(outBuf = realloc(outBuf, outBufSize + 1))) {
+					fprintf(stderr, "%s: malloc error, unable to increase output buffer to %lu bytes (%s)\n",
+							inFile, outBufSize, strerror(errno));
+					utimes(inFile, times);
+					goto bail;
+				}
+				// update this one!
+				SET_BLOCKSTART();
+				currBlock = outBuf + currBlockOffset;
+				currBlockLen = outBufSize;
+// 				fprintf(stderr, "%s: chunk #%d: outBuf increased by %lu to %zd bytes; "
+// 						"blockStart=%p, currBlock=&outBuf[%lu]=%p outdecmpfsBuf=%p magic=%p\n",
+// 						inFile, blockNr, cmpedsize, outBufSize, blockStart, currBlockOffset, currBlock,
+// 						outdecmpfsBuf, OSSwapLittleToHostInt32(decmpfsAttr->compression_magic));
+#endif
 				break;
 #ifdef HAS_LZVN
 			case LZVN:{
@@ -633,13 +662,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 							inFile, outBufSize, strerror(errno));
 					utimes(inFile, times);
 					goto bail;
-				} else {
-					// update this one!
-					chunkTable = outBuf;
-// 					fprintf(stderr, "%s: chunk #%d: outBuf increased by %lu to %zd bytes; currBlock=&outBuf[%lu]=%p; out[0]=0x%x\n",
-// 							inFile, blockNr, cmpedsize, outBufSize, currBlockOffset, outBuf + currBlockOffset,
-// 							((UInt32*)outBufBlock)[0]);
 				}
+				// update this one!
+				chunkTable = outBuf;
+// 				fprintf(stderr, "%s: chunk #%d: outBuf increased by %lu to %zd bytes; currBlock=&outBuf[%lu]=%p; out[0]=0x%x\n",
+// 						inFile, blockNr, cmpedsize, outBufSize, currBlockOffset, outBuf + currBlockOffset,
+// 						((UInt32*)outBufBlock)[0]);
 				currBlock = outBuf + currBlockOffset;
 				currBlockLen = outBufSize;
 				if (blockNr > 1 && ((UInt32*)currBlock)[-1] != prevLast) {
@@ -689,6 +717,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			case ZLIB:
 				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x4) = EndianU32_NtoL(currBlock - blockStart);
 				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x8) = EndianU32_NtoL(cmpedsize);
+// 				fprintf(stderr, "blockOffset@%zd = %zd, blockLen@%zd = %zd\n",
+// 						((inBufPos / compblksize) * 8) + 0x4, currBlock - blockStart,
+// 						((inBufPos / compblksize) * 8) + 0x8, cmpedsize);
 				break;
 			default:
 				// noop
@@ -717,17 +748,46 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		// create and write the resource fork:
 		switch (comptype) {
 			case ZLIB:
+#ifndef ZLIB_SINGLESHOT_OUTBUF
+// 				fprintf(stderr, "\tfinal increase outBuf %p by %lu to %zd bytes\n"
+// 						"\tblockStart=%p currBlock=%p\n",
+// 						outBuf, cmpedsize, outBufSize, blockStart, currBlock);
+				currBlockOffset = currBlock - outBuf;
+				outBufSize += currBlockOffset + sizeof(decmpfs_resource_zlib_trailer);
+				if (!(outBuf = realloc(outBuf, outBufSize + 1))) {
+					fprintf(stderr, "%s: malloc error, unable to increase output buffer to %lu bytes (%s)\n",
+							inFile, outBufSize, strerror(errno));
+					utimes(inFile, times);
+					goto bail;
+				}
+				// update this one!
+				SET_BLOCKSTART();
+				currBlock = outBuf + currBlockOffset;
+// 				fprintf(stderr, "%s: chunk #%d: final outBuf increase by %lu to %zd bytes; "
+// 						"blockStart=%p, currBlock=&outBuf[%lu]=%p\n",
+// 						inFile, blockNr, cmpedsize, outBufSize, blockStart, currBlockOffset, currBlock);
+#endif
 				*(UInt32 *) (outBuf + 4) = EndianU32_NtoB(currBlock - outBuf);
 				*(UInt32 *) (outBuf + 8) = EndianU32_NtoB(currBlock - outBuf - 0x100);
 				*(UInt32 *) (blockStart - 4) = EndianU32_NtoB(currBlock - outBuf - 0x104);
-				memset(currBlock, 0, 24);
-				*(UInt16 *) (currBlock + 24) = EndianU16_NtoB(0x1C);
-				*(UInt16 *) (currBlock + 26) = EndianU16_NtoB(0x32);
-				*(UInt16 *) (currBlock + 28) = 0;
-				*(UInt32 *) (currBlock + 30) = EndianU32_NtoB(cmpf);
-				*(UInt32 *) (currBlock + 34) = EndianU32_NtoB(0xA);
-				*(UInt64 *) (currBlock + 38) = EndianU64_NtoL(0xFFFF0100);
-				*(UInt32 *) (currBlock + 46) = 0;
+				decmpfs_resource_zlib_trailer *resourceTrailer = (decmpfs_resource_zlib_trailer*) currBlock;
+// 				memset(currBlock, 0, 24);
+				memset(&resourceTrailer->empty[0], 0, 24);
+// 				*(UInt16 *) (currBlock + 24) = EndianU16_NtoB(0x1C);
+// 				*(UInt16 *) (currBlock + 26) = EndianU16_NtoB(0x32);
+// 				*(UInt16 *) (currBlock + 28) = 0;
+				resourceTrailer->magic1 = OSSwapHostToBigInt16(0x1C);
+				resourceTrailer->magic2 = OSSwapHostToBigInt16(0x32);
+				resourceTrailer->spacer1 = 0;
+// 				*(UInt32 *) (currBlock + 30) = EndianU32_NtoB(cmpf);
+				resourceTrailer->compression_magic = OSSwapHostToBigInt32(cmpf);
+// 				*(UInt32 *) (currBlock + 34) = EndianU32_NtoB(0xA);
+// 				*(UInt64 *) (currBlock + 38) = EndianU64_NtoL(0xFFFF0100);
+// 				*(UInt32 *) (currBlock + 46) = 0;
+				resourceTrailer->magic3 = OSSwapHostToBigInt32(0xA);
+				resourceTrailer->magic4 = OSSwapHostToLittleInt64(0xFFFF0100);
+				resourceTrailer->spacer2 = 0;
+// 				fprintf(stderr, "setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n", outBuf, currBlock - outBuf + 50);
 				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, currBlock - outBuf + 50, 0,
 					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 				{
@@ -774,25 +834,29 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	signal(SIGINT, SIG_IGN);
 	signal(SIGHUP, SIG_IGN);
 #endif
-	in = fopen(inFile, "w");
-	if (in == NULL)
+	// we rewrite the data fork - it should contain 0 bytes if compression succeeded.
+// 	in = fopen(inFile, "w");
+	in = NULL;
+	int fdIn = open(inFile, O_WRONLY|O_TRUNC|O_EXLOCK);
+	if (fdIn == -1)
 	{
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 		goto bail;
 	}
-	fclose(in); in = NULL;
-	if (chflags(inFile, UF_COMPRESSED | inFileInfo->st_flags) < 0)
+	if (fchflags(fdIn, UF_COMPRESSED | inFileInfo->st_flags) < 0)
 	{
 		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
-		if (removexattr(inFile, DECMPFS_XATTR_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
+		if (fremovexattr(fdIn, DECMPFS_XATTR_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 		{
 			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 		}
-		if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK &&
-			removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
+// 		if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK &&
+		if (OSSwapLittleToHostInt32(decmpfsAttr->compression_type) == compressionType.resourceFork &&
+			fremovexattr(fdIn, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 		{
 			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 		}
+		close(fdIn);
 		in = fopen(inFile, "w");
 		if (in == NULL)
 		{
@@ -814,25 +878,33 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			}
 			goto bail;
 		}
-		fclose(in); in = NULL;
+		fclose(in);
 		utimes(inFile, times);
 		goto bail;
 	}
+// 	fclose(in); in = NULL;
+	fsync(fdIn);
+	close(fdIn);
 	if (checkFiles)
 	{
 		lstat(inFile, inFileInfo);
-		in = fopen(inFile, "r");
-		if (in == NULL)
+		fdIn = open(inFile, O_RDONLY|O_EXLOCK);
+		if (fdIn == -1)
 		{
 			fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 			goto bail;
 		}
-		if ((inFileInfo->st_size != filesize || 
-			fread(outBuf, filesize, 1, in) != 1 ||
-			memcmp(outBuf, inBuf, filesize) != 0) && comptype != LZVN)
+		bool sizeMismatch = false, readFailure = false, contentMismatch = false;
+		ssize_t checkRead= -2;
+		if ((sizeMismatch = inFileInfo->st_size != filesize) || 
+			(readFailure = (checkRead = read(fdIn, outBuf, filesize)) != filesize) ||
+			(contentMismatch = memcmp(outBuf, inBuf, filesize) != 0))
 		{
-			fclose(in);
+// 			fclose(in);
+			close(fdIn);
 			printf("%s: Compressed file check failed, reverting file changes\n", inFile);
+			fprintf(stderr, "\tsize mismatch=%d read=%zd failure=%d content mismatch=%d\n",
+				sizeMismatch, checkRead, readFailure, contentMismatch);
 			if (backupName)
 			{
 				fprintf(stderr, "\tin case of further failures, a backup will be available as %s\n", backupName);
@@ -847,7 +919,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			{
 				fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 			}
-			if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK && 
+// 			if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK && 
+			if (OSSwapLittleToHostInt32(decmpfsAttr->compression_type) == compressionType.resourceFork &&
 				removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 			{
 				fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));

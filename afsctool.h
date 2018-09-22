@@ -23,6 +23,7 @@
 #include <hfs/hfs_format.h>
 
 #include <AvailabilityMacros.h>
+#include <MacTypes.h>
 
 #ifdef HAS_DECMPFS
 #	include <sys/decmpfs.h>
@@ -122,6 +123,22 @@ struct filetype_info
 	long long int num_files;
 	long long int num_hard_link_files;
 };
+
+typedef struct __attribute__((packed)) {
+	char empty[24];
+    UInt16 magic1, magic2, spacer1;
+    UInt32 compression_magic;
+    UInt32 magic3;
+    UInt64 magic4;
+	UInt32 spacer2;
+} decmpfs_resource_zlib_trailer;
+
+#ifdef HAS_LZVN
+	// LZVN decmpfs compression starts with a table of 4-byte offsets into the resource
+	// fork, terminated with the offset where no more compressed data is to be found.
+	// The first offset is thus also sizeof(UInt32) (4) times the size of the table.
+	typedef UInt32 lzvn_chunk_table;
+#endif
 
 #ifdef SUPPORT_PARALLEL
 #	ifdef __cplusplus

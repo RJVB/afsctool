@@ -34,6 +34,7 @@
 #include <CoreServices/CoreServices.h>
 #else
 	// for cross-platform debugging only!
+	#include <bsd/stdlib.h>
 	#include <endian.h>
 	#include <sys/vfs.h>
 	#include <sys/stat.h>
@@ -85,6 +86,7 @@ const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 102
 	(long long int) 1024 * 1024 * 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024 * 1024 * 1024};
 
 int printVerbose = 0;
+static size_t maxOutBufSize = 0;
 void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp, bool onAPFS);
 
 char* getSizeStr(long long int size, long long int size_rounded, int likeFinder)
@@ -526,7 +528,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			cmpedsize = zlib_EstimatedCompressedChunkSize = compressBound(compblksize);
 			struct compressionType t = {CMP_ZLIB_XATTR, CMP_ZLIB_RESOURCE_FORK};
 			compressionType = t;
-   #define ZLIB_SINGLESHOT_OUTBUF
+// #define ZLIB_SINGLESHOT_OUTBUF
 #ifdef ZLIB_SINGLESHOT_OUTBUF
 			outBufSize = filesize + 0x13A + (numBlocks * 9);
 #else
@@ -654,7 +656,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 // 						"\tblockStart=%p currBlock=%p outdecmpfsBuf=%p magic=%p\n",
 // 						blockNr, bytesAfterCursor, outBuf, cmpedsize, outBufSize, blockStart, currBlock,
 // 						outdecmpfsBuf, OSSwapLittleToHostInt32(decmpfsAttr->compression_magic));
-				if (!(outBuf = realloc(outBuf, outBufSize + 1))) {
+				if (!(outBuf = reallocf(outBuf, outBufSize + 1))) {
 					fprintf(stderr, "%s: malloc error, unable to increase output buffer to %lu bytes (%s)\n",
 							inFile, outBufSize, strerror(errno));
 					utimes(inFile, times);
@@ -691,7 +693,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				outBufSize += cmpedsize;
 // 				fprintf(stderr, "\tchunk #%d from %lu input bytes: increasing outBuf %p by %lu to %zd bytes\n",
 // 						blockNr, bytesAfterCursor, outBuf, cmpedsize, outBufSize);
-				if (!(outBuf = realloc(outBuf, outBufSize))) {
+				if (!(outBuf = reallocf(outBuf, outBufSize))) {
 					fprintf(stderr, "%s: malloc error, unable to increase output buffer to %lu bytes (%s)\n",
 							inFile, outBufSize, strerror(errno));
 					utimes(inFile, times);
@@ -788,7 +790,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 // 						outBuf, cmpedsize, outBufSize, blockStart, currBlock);
 				currBlockOffset = currBlock - outBuf;
 				outBufSize += currBlockOffset + sizeof(decmpfs_resource_zlib_trailer);
-				if (!(outBuf = realloc(outBuf, outBufSize + 1))) {
+				if (!(outBuf = reallocf(outBuf, outBufSize + 1))) {
 					fprintf(stderr, "%s: malloc error, unable to increase output buffer to %lu bytes (%s)\n",
 							inFile, outBufSize, strerror(errno));
 					utimes(inFile, times);
@@ -858,6 +860,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			default:
 				// noop
 				break;
+		}
+		if (outBufSize > maxOutBufSize) {
+			maxOutBufSize = outBufSize;
 		}
 	}
 #ifdef __APPLE__
@@ -942,7 +947,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		if (fdIn == -1)
 		{
 			fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-			goto bail;
+			// we don't bail here, we fail (= restore the backup).
+			goto fail;
+		}
+		if (!(outBuf = reallocf(outBuf, filesize))) {
+			close(fdIn);
+			fprintf(stderr, "%s: failure reallocating buffer for validation; %s\n", inFile, strerror(errno));
+			goto fail;
 		}
 		bool sizeMismatch = false, readFailure = false, contentMismatch = false;
 		ssize_t checkRead= -2;
@@ -950,7 +961,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			(readFailure = (checkRead = read(fdIn, outBuf, filesize)) != filesize) ||
 			(contentMismatch = memcmp(outBuf, inBuf, filesize) != 0))
 		{
-// 			fclose(in);
+fail:;
 			close(fdIn);
 			printf("%s: Compressed file check failed, reverting file changes\n", inFile);
 			fprintf(stderr, "\tsize mismatch=%d read=%zd failure=%d content mismatch=%d\n",
@@ -3320,5 +3331,8 @@ next_arg:;
 		releaseParallelProcessor(PP);
 	}
 #endif
+// 	if (maxOutBufSize) {
+// 		fprintf(stderr, "maxOutBufSize: %zd\n", maxOutBufSize);
+// 	}
 	return 0;
 }

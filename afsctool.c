@@ -528,7 +528,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			cmpedsize = zlib_EstimatedCompressedChunkSize = compressBound(compblksize);
 			struct compressionType t = {CMP_ZLIB_XATTR, CMP_ZLIB_RESOURCE_FORK};
 			compressionType = t;
-// #define ZLIB_SINGLESHOT_OUTBUF
 #ifdef ZLIB_SINGLESHOT_OUTBUF
 			outBufSize = filesize + 0x13A + (numBlocks * 9);
 #else

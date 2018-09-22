@@ -5,6 +5,10 @@ set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.$
 option(HFSCOMPRESS_TO_ZFS
     "Should afsctool compress files on ZFS dataset that claim to be HFS (testing only: the effort will be wasted)"
     OFF)
+option(ZLIB_SINGLESHOT
+    "Does the ZLIB compression into a sufficiently (= too) large output buffer instead of using a growing buffer.\
+    May be somewhat faster at the expense of approx. 4x higher memory usage."
+    OFF)
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules ${CMAKE_MODULE_PATH} )
 
@@ -27,6 +31,9 @@ message(STATUS "LZVN_HEADER,LIB: ${LZVN_HEADER} ${LZVN_LIBRARY}")
 include_directories(${ZLIBP_INCLUDE_DIR} ${SPARSEHASH_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_SOURCE_DIR})
 link_directories(${SPARSEHASH_LIBRARY})
 add_definitions(-DSUPPORT_PARALLEL)
+if(ZLIB_SINGLESHOT)
+    add_definitions(ZLIB_SINGLESHOT_OUTBUF)
+endif()
 if(HAS_DECMPFS)
     message(STATUS "Found system decmpfs.h header")
     add_definitions(-DHAS_DECMPFS)

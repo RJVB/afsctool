@@ -191,7 +191,7 @@ protected:
 	DWORD ioLockingThread;
 	int verboseLevel;
 friend class FileProcessor;
-friend class FileEntry;
+friend struct FileEntry;
 };
 
 class FileProcessor : public Thread
@@ -246,7 +246,9 @@ protected:
 	const bool isBackwards;
 	const int procID;
 	CRITSECTLOCK::Scope *scope;
+#ifdef __MACH__
 	thread_basic_info_data_t threadInfo;
+#endif
 	bool hasInfo;
 	friend class ParallelFileProcessor;
 private:

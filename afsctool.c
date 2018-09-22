@@ -6,6 +6,14 @@
  * This code is made available under the GPL3 License
  * (See License.txt)
  */
+
+#ifndef __APPLE__
+	#define __USE_BSD
+	#ifndef _BSD_SOURCE
+	#	define _BSD_SOURCE
+	#endif
+#endif
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,10 +27,26 @@
 #	include <FastCompression.h>
 #endif
 
+#ifdef __APPLE__
 #include <sys/attr.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreServices/CoreServices.h>
+#else
+	// for cross-platform debugging only!
+	#include <endian.h>
+	#include <sys/vfs.h>
+	#include <sys/stat.h>
+	#include <fcntl.h>
+	#define O_EXLOCK 0
+	#define HFSPlusAttrKey 0
+	#define HFSPlusCatalogFile 0
+	#define OSSwapHostToBigInt16(x)		htobe16(x)
+	#define OSSwapHostToBigInt32(x)		htobe32(x)
+	#define OSSwapHostToLittleInt32(x)	htole32(x)
+	#define OSSwapHostToLittleInt64(x)	htole64(x)
+	#define OSSwapLittleToHostInt32(x)	le32toh(x)
+#endif
 
 #include "afsctool.h"
 #ifdef SUPPORT_PARALLEL
@@ -166,6 +190,7 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, bool *isAPF
 	struct statfs fsInfo;
 	errno = 0;
 	int ret = statfs(inFile, &fsInfo);
+#ifdef __APPLE__
 	// https://github.com/RJVB/afsctool/pull/1#issuecomment-352727426
 	uint32_t MNTTYPE_ZFS_SUBTYPE = 'Z'<<24|'F'<<16|'S'<<8;
 // // 	fprintf( stderr, "statfs=%d f_type=%u f_fssubtype=%u \"%s\" ISREG=%d UF_COMPRESSED=%d compressable=%d\n",
@@ -227,6 +252,9 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, bool *isAPF
 		&& S_ISREG(inFileInfo->st_mode)
 		&& (inFileInfo->st_flags & UF_COMPRESSED) == 0);
 #endif
+#else // !APPLE
+	return (ret >= 0 && S_ISREG(inFileInfo->st_mode));
+#endif
 }
 
 /*! Mac OS X basename() can modify the input string when not in 'legacy' mode on 10.6
@@ -280,7 +308,7 @@ const char *compressionTypeName(int type)
 #ifdef SUPPORT_PARALLEL
 void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker )
 #else
-void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo)
+void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *ignored)
 #endif
 {
 	long long int maxSize = folderinfo->maxSize;
@@ -313,10 +341,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		return;
 	}
 
+#ifdef __APPLE__
 	times[0].tv_sec = inFileInfo->st_atimespec.tv_sec;
 	times[0].tv_usec = inFileInfo->st_atimespec.tv_nsec / 1000;
 	times[1].tv_sec = inFileInfo->st_mtimespec.tv_sec;
 	times[1].tv_usec = inFileInfo->st_mtimespec.tv_nsec / 1000;
+#endif
 	
 	if (!fileIsCompressable(inFile, inFileInfo, &folderinfo->onAPFS)){
 		return;
@@ -345,6 +375,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		lstat(inFile, inFileInfo);
 	}
 
+#ifdef __APPLE__
 	if (chflags(inFile, UF_COMPRESSED | inFileInfo->st_flags) < 0 || chflags(inFile, inFileInfo->st_flags) < 0)
 	{
 		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
@@ -376,6 +407,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		free(xattrnames);
 	}
+#endif // APPLE
 
 	numBlocks = (filesize + compblksize - 1) / compblksize;
 	// TODO: make compression-type specific (as far as that's possible).
@@ -416,6 +448,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		return;
 	}
 	fclose(in); in = NULL;
+#ifdef __APPLE__
 	if (backupFile)
 	{ int fd, bkNameLen;
 	  FILE *fp;
@@ -462,6 +495,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		utimes(backupName, times);
 		chmod(backupName, orig_mode);
 	}
+#endif
 #ifdef SUPPORT_PARALLEL
 	if( exclusive_io && worker ){
 		locked = unLockParallelProcessorIO(worker);
@@ -571,12 +605,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	unsigned long currBlockLen, currBlockOffset;
 	switch (comptype) {
 		case ZLIB:
-			*(UInt32 *) outBuf = EndianU32_NtoB(0x100);
-			*(UInt32 *) (outBuf + 12) = EndianU32_NtoB(0x32);
+			*(UInt32 *) outBuf = OSSwapHostToBigInt32(0x100);
+			*(UInt32 *) (outBuf + 12) = OSSwapHostToBigInt32(0x32);
 			memset(outBuf + 16, 0, 0xF0);
 			SET_BLOCKSTART();
 			// block table: numBlocks + offset,blocksize pairs for each of the blocks
-			*(UInt32 *) blockStart = EndianU32_NtoL(numBlocks);
+			*(UInt32 *) blockStart = OSSwapHostToLittleInt32(numBlocks);
 			// actual compressed data starts after the block table
 			currBlock = blockStart + sizeof(UInt32) + (numBlocks * 8);
 			currBlockLen = outBufSize - (currBlock - outBuf);
@@ -715,8 +749,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		switch (comptype) {
 			case ZLIB:
-				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x4) = EndianU32_NtoL(currBlock - blockStart);
-				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x8) = EndianU32_NtoL(cmpedsize);
+				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x4) = OSSwapHostToLittleInt32(currBlock - blockStart);
+				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x8) = OSSwapHostToLittleInt32(cmpedsize);
 // 				fprintf(stderr, "blockOffset@%zd = %zd, blockLen@%zd = %zd\n",
 // 						((inBufPos / compblksize) * 8) + 0x4, currBlock - blockStart,
 // 						((inBufPos / compblksize) * 8) + 0x8, cmpedsize);
@@ -767,9 +801,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 // 						"blockStart=%p, currBlock=&outBuf[%lu]=%p\n",
 // 						inFile, blockNr, cmpedsize, outBufSize, blockStart, currBlockOffset, currBlock);
 #endif
-				*(UInt32 *) (outBuf + 4) = EndianU32_NtoB(currBlock - outBuf);
-				*(UInt32 *) (outBuf + 8) = EndianU32_NtoB(currBlock - outBuf - 0x100);
-				*(UInt32 *) (blockStart - 4) = EndianU32_NtoB(currBlock - outBuf - 0x104);
+				*(UInt32 *) (outBuf + 4) = OSSwapHostToBigInt32(currBlock - outBuf);
+				*(UInt32 *) (outBuf + 8) = OSSwapHostToBigInt32(currBlock - outBuf - 0x100);
+				*(UInt32 *) (blockStart - 4) = OSSwapHostToBigInt32(currBlock - outBuf - 0x104);
 				decmpfs_resource_zlib_trailer *resourceTrailer = (decmpfs_resource_zlib_trailer*) currBlock;
 // 				memset(currBlock, 0, 24);
 				memset(&resourceTrailer->empty[0], 0, 24);
@@ -788,12 +822,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				resourceTrailer->magic4 = OSSwapHostToLittleInt64(0xFFFF0100);
 				resourceTrailer->spacer2 = 0;
 // 				fprintf(stderr, "setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n", outBuf, currBlock - outBuf + 50);
+#ifdef __APPLE__
 				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, currBlock - outBuf + 50, 0,
 					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 				{
 					fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
 					goto bail;
 				}
+#else
+				fprintf(stderr, "# setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n", outBuf, currBlock - outBuf + 50);
+#endif
 				break;
 #ifdef HAS_LZVN
 			case LZVN: {
@@ -804,12 +842,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 // 				// chunkTable is just a window on outBuf so we should be able
 // 				// to read element [numBlocks].
 // 				fprintf(stderr, ",%u}\n", chunkTable[numBlocks]);
+#ifdef __APPLE__
 				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, outBufSize, 0,
 					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 				{
 					fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
 					goto bail;
 				}
+#else
+				fprintf(stderr, "# setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n", outBuf, outBufSize);
+#endif
 				break;
 			}
 #endif
@@ -818,12 +860,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				break;
 		}
 	}
+#ifdef __APPLE__
 	// set the decmpfs attribute, which may or may not contain compressed data.
 	if (setxattr(inFile, DECMPFS_XATTR_NAME, outdecmpfsBuf, outdecmpfsSize, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 	{
 		fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
 		goto bail;
 	}
+#else
+	fprintf(stderr, "# setxattr(DECMPFS_XATTR_NAME) buf=%p len=%u\n", outdecmpfsBuf, outdecmpfsSize);
+#endif
 
 #ifdef SUPPORT_PARALLEL
 	// 20160928: the actual rewrite of the file is never done in parallel
@@ -835,8 +881,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	signal(SIGHUP, SIG_IGN);
 #endif
 	// we rewrite the data fork - it should contain 0 bytes if compression succeeded.
-// 	in = fopen(inFile, "w");
 	in = NULL;
+#ifdef __APPLE__
 	int fdIn = open(inFile, O_WRONLY|O_TRUNC|O_EXLOCK);
 	if (fdIn == -1)
 	{
@@ -885,6 +931,10 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 // 	fclose(in); in = NULL;
 	fsync(fdIn);
 	close(fdIn);
+#else
+	int fdIn;
+	fprintf(stderr, "# empty datafork and set UF_COMPRESSED flag\n");
+#endif
 	if (checkFiles)
 	{
 		lstat(inFile, inFileInfo);
@@ -905,6 +955,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			printf("%s: Compressed file check failed, reverting file changes\n", inFile);
 			fprintf(stderr, "\tsize mismatch=%d read=%zd failure=%d content mismatch=%d\n",
 				sizeMismatch, checkRead, readFailure, contentMismatch);
+#ifdef __APPLE__
 			if (backupName)
 			{
 				fprintf(stderr, "\tin case of further failures, a backup will be available as %s\n", backupName);
@@ -938,15 +989,18 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				xfree(backupName);
 				goto bail;
 			}
+			fclose(in);
+#endif
 		}
-		fclose(in);
 		in = NULL;
 	}
 bail:
+#ifdef __APPLE__
 	utimes(inFile, times);
 	if (inFileInfo->st_mode != orig_mode) {
 		chmod(inFile, orig_mode);
 	}
+#endif
 #ifdef SUPPORT_PARALLEL
 	if( worker ){
 		locked = unLockParallelProcessorIO(worker);
@@ -979,6 +1033,7 @@ bail:
 
 void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile)
 {
+#ifdef __APPLE__
 	FILE *in;
 	int uncmpret;
 	unsigned int compblksize = 0x10000, numBlocks, currBlock;
@@ -1445,6 +1500,9 @@ bail:
 	xfree(inBuf);
 	xfree(indecmpfsBuf);
 	xfree(outBuf);
+#else
+	// not much point doing a non-Apple implementation, even for testing
+#endif
 }
 
 bool checkForHardLink(const char *filepath, const struct stat *fileInfo, const struct folder_info *folderinfo)
@@ -1607,6 +1665,7 @@ void add_extension_to_filetypeinfo(const char *filepath, struct filetype_info *f
 
 char* getFileType(const char *filepath)
 {
+#ifdef __APPLE__
 	CFStringRef filepathCF = CFStringCreateWithCString(kCFAllocatorDefault, filepath, kCFStringEncodingUTF8);
 	CFStringRef filetype;
 	MDItemRef fileMDItem;
@@ -1635,6 +1694,9 @@ char* getFileType(const char *filepath)
 	free(filetypeMaxLenStr);
 	
 	return filetypeStr;
+#else
+	return strdup("aFile");
+#endif
 }
 
 struct filetype_info* getFileTypeInfo(const char *filepath, const char *filetype, struct folder_info *folderinfo)
@@ -1717,7 +1779,8 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 	bool hasRF = FALSE;
 	
 	printf("%s:\n", filepath);
-	
+
+#ifdef __APPLE__
 	xattrnamesize = listxattr(filepath, NULL, 0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
 	
 	if (xattrnamesize > 0)
@@ -1776,12 +1839,17 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		}
 		free(xattrnames);
 	}
+#endif
 
 	if ((int)onAPFS == -1) {
 		fileIsCompressable(filepath, fileinfo, &onAPFS);
 	}
 
+#ifdef __APPLE__
 	if ((fileinfo->st_flags & UF_COMPRESSED) == 0)
+#else
+	if (true)
+#endif
 	{
 		if (appliedcomp)
 			printf("Unable to compress file.\n");
@@ -1906,6 +1974,7 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 		return 0;
 	}
 
+#ifdef __APPLE__
 	xattrnamesize = listxattr(filepath, NULL, 0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
 	
 	if (xattrnamesize > 0)
@@ -1947,7 +2016,8 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 		}
 		free(xattrnames);
 	}
-	
+#endif
+
 	folderinfo->num_files++;
 	
 	if (folderinfo->filetypeslist != NULL && filetype != NULL)
@@ -1966,8 +2036,10 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 	if (folderinfo->filetypeslist != NULL && filetype_found)
 		filetypeinfo = getFileTypeInfo(filepath, filetype, folderinfo);
 	if (filetype_found && filetypeinfo != NULL) filetypeinfo->num_files++;
-	
+
+#ifdef __APPLE__
 	if ((fileinfo->st_flags & UF_COMPRESSED) == 0)
+#endif
 	{
 		ret = filesize_rounded = filesize = fileinfo->st_size;
 		filesize_rounded = roundToBlkSize(filesize_rounded, fileinfo);
@@ -1994,6 +2066,7 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 		if (filetypeinfo != NULL && filetype_found)
 			filetypeinfo->total_size += filesize;
 	}
+#ifdef __APPLE__
 	else
 	{
 		if (folderinfo->print_files)
@@ -2068,6 +2141,7 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 			filetypeinfo->num_compressed++;
 		}
 	}
+#endif
 	return ret;
 }
 
@@ -2139,7 +2213,8 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 					{
 						numxattrs = 0;
 						xattrssize = 0;
-						
+
+#ifdef __APPLE__
 						xattrnamesize = listxattr(currfile->fts_path, NULL, 0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
 						
 						if (xattrnamesize > 0)
@@ -2170,11 +2245,12 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 							}
 							free(xattrnames);
 						}
-						folderinfo->num_folders++;
 						folderinfo->total_size += xattrssize;
 						if (!folderinfo->onAPFS) {
 							folderinfo->total_size += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFolder);
 						}
+#endif
+						folderinfo->num_folders++;
 					}
 					else
 					{
@@ -2182,9 +2258,11 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 						fts_set(currfolder, currfile, FTS_SKIP);
 						
 						folderinfo->num_folders++;
+#ifdef __APPLE__
 						if (!folderinfo->onAPFS) {
 							folderinfo->total_size += sizeof(HFSPlusCatalogFolder);
 						}
+#endif
 					}
 				}
 			}
@@ -2242,6 +2320,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 								compressFile(currfile->fts_path, currfile->fts_statp, folderinfo, NULL);
 							}
 						}
+#ifdef __APPLE__
 						lstat(currfile->fts_path, currfile->fts_statp);
 						if (((currfile->fts_statp->st_flags & UF_COMPRESSED) == 0) && folderinfo->print_files)
 						{
@@ -2249,6 +2328,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 								printf("Unable to compress: ");
 							printf("%s\n", currfile->fts_path);
 						}
+#endif
 					}
 					process_file(currfile->fts_path, filetype, currfile->fts_statp, folderinfo);
 				}
@@ -2721,7 +2801,8 @@ next_arg:;
 			}
 			lstat(fullpath, &fileinfo);
 		}
-		
+
+#ifdef __APPLE__
 		if (createfile)
 		{
 			if (!argIsFile)
@@ -2925,7 +3006,9 @@ next_arg:;
 				}
 			}
 		}
-		else if (decomp && argIsFile)
+		else
+#endif
+		if (decomp && argIsFile)
 		{
 			if (printVerbose > 1) {
 				printFileInfo(fullpath, &fileinfo, false, (bool)-1);
@@ -2983,6 +3066,7 @@ next_arg:;
 			}
 			fts_close(currfolder);
 		}
+#ifdef __APPLE__
 		else if (argIsFile && printVerbose == 0)
 		{
 			if (applycomp)
@@ -2998,6 +3082,7 @@ next_arg:;
 					printf("File is not HFS+/APFS compressed.\n");
 			}
 		}
+#endif
 		else if (argIsFile && printVerbose > 0)
 		{
 			bool onAPFS;

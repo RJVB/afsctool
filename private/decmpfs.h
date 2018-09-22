@@ -30,7 +30,14 @@
 #ifndef _SYS_DECMPFS_H_
 #define _SYS_DECMPFS_H_ 1
 
+#ifdef __APPLE__
 #include <sys/kernel_types.h>
+#else
+typedef u_int16_t uint16_t;
+typedef u_int32_t uint32_t;
+typedef u_int64_t uint64_t;
+typedef int64_t   user_ssize_t;
+#endif
 
 #define MAX_DECMPFS_XATTR_SIZE 3802
 

@@ -5,9 +5,13 @@
  *  This code is made available under No License At All
  */
 
+#ifdef __MACH__
 #include <mach/mach_init.h>
 #include <mach/thread_act.h>
 #include <mach/mach_port.h>
+#endif
+
+#include <algorithm>
 
 #include "ParallelProcess_p.h"
 #include "ParallelProcess.h"
@@ -230,6 +234,7 @@ int ParallelFileProcessor::run()
 				}
 				if( verboseLevel > 1 ){
 					if( thread->hasInfo ){
+#ifdef __MACH__
 						fprintf( stderr, "\n\t%gs user + %gs system; %ds slept",
 							thread->threadInfo.user_time.seconds + thread->threadInfo.user_time.microseconds * 1e-6,
 							thread->threadInfo.system_time.seconds + thread->threadInfo.system_time.microseconds * 1e-6,
@@ -237,6 +242,7 @@ int ParallelFileProcessor::run()
 						if( thread->threadInfo.cpu_usage ){
 							fprintf( stderr, "; %0.2lf%% CPU", thread->threadInfo.cpu_usage / 10.0 );
 						}
+#endif
 					}
 				}
 			}
@@ -286,6 +292,7 @@ DWORD FileProcessor::Run(LPVOID arg)
 			runningTotalRaw += entry.fileInfo.st_size;
 			runningTotalCompressed += (entry.compressedSize > 0)? entry.compressedSize : entry.fileInfo.st_size;
 			if( PP->verbose() > 1 ){
+#ifdef __MACH__
 				mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
 				thread_basic_info_data_t info;
 				int kr = thread_info( mach_thread_self(), THREAD_BASIC_INFO, (thread_info_t) &info, &count);
@@ -294,6 +301,7 @@ DWORD FileProcessor::Run(LPVOID arg)
 					 threadInfo = info;
 					 hasInfo = true;
 				}
+#endif
 			}
 		}
 	}
@@ -301,12 +309,16 @@ DWORD FileProcessor::Run(LPVOID arg)
 }
 
 void FileProcessor::InitThread()
-{ // pthread_t thread = (pthread_t) GetThreadId(GetThread());
-  char name[16];
-//	extern int pthread_setname_np(const char *);
+{
+	char name[16];
 	snprintf( name, 16, "FilePr #%d", procID );
+#ifdef __MACH__
 	pthread_setname_np(name);
 	memset( &threadInfo, 0, sizeof(threadInfo) );
+#else
+	pthread_t thread = (pthread_t) GetThreadId(GetThread());
+	pthread_setname_np(thread, name);
+#endif
 	hasInfo = false;
 }
 

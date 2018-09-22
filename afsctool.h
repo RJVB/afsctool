@@ -20,10 +20,24 @@
 #include <sys/mount.h>
 #include <fts.h>
 #include <sys/xattr.h>
+#ifdef __APPLE__
 #include <hfs/hfs_format.h>
 
 #include <AvailabilityMacros.h>
 #include <MacTypes.h>
+#else
+    #include <sys/types.h>
+    #define false 0
+    #define FALSE 0
+    #define true !false
+#define TRUE !FALSE
+#   ifndef __cplusplus
+        typedef unsigned char bool;
+#   endif
+    typedef u_int16_t UInt16;
+    typedef u_int32_t UInt32;
+    typedef u_int64_t UInt64;
+#endif
 
 #ifdef HAS_DECMPFS
 #	include <sys/decmpfs.h>
@@ -147,7 +161,7 @@ extern void compressFile(const char *inFile, struct stat *inFileInfo, struct fol
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker);
 #	endif
 #else
-extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo);
+extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *ignored);
 #endif
 extern long long process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo);
 extern int afsctool (int argc, const char * argv[]);

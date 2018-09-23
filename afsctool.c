@@ -711,7 +711,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			if (!allowLargeBlocks && (((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos) == compblksize)
 			{
 				if (printVerbose >= 2) {
-					fprintf(stderr, "%s: allow large blocks to compress (-L)\n", inFile);
+					fprintf(stderr, "%s: file has a compressed chunk that's larger than the original chunk; -L to compress\n", inFile);
 				}
 				utimes(inFile, times);
 				goto bail;
@@ -2312,7 +2312,7 @@ void printUsage()
 		   "-v Increase verbosity level\n"
 		   "-f Detect hard links\n"
 		   "-l List files that are HFS+/APFS compressed (or if the -c option is given, files which fail to compress)\n"
-		   "-L Allow large compressed blocks (not recommended; always true for LZVN compression)\n"
+		   "-L Allow larger-than-raw compressed chunks (not recommended; always true for LZVN compression)\n"
 		   "-n Do not verify files after compression (not recommended)\n"
 		   "-m <size> Largest file size to compress, in bytes\n"
 		   "-s <percentage> For compression to be applied, compression savings must be at least this percentage\n"

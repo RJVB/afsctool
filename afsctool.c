@@ -322,7 +322,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	bool checkFiles = folderinfo->check_files;
 	bool backupFile = folderinfo->backup_file;
 
-	FILE *in;
 	// 64Kb block size (HFS compression is "64K chunked")
 	const int compblksize = 0x10000;
 	unsigned int numBlocks, outdecmpfsSize = 0;
@@ -428,12 +427,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		locked = lockParallelProcessorIO(worker);
 	}
 #endif
-// 	in = fopen(inFile, "r+");
-// 	if (in == NULL)
-// 	{
-// 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-// 		return;
-// 	}
 	// use open() with an exclusive lock so noone can modify the file while we're at it
 	int fdIn = open(inFile, O_RDWR|O_EXLOCK);
 	if (fdIn == -1)
@@ -445,20 +438,18 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	if (inBuf == NULL)
 	{
 		fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, filesize, strerror(errno));
-		fclose(in);
+		xclose(fdIn);
 		utimes(inFile, times);
 		return;
 	}
 	if (read(fdIn, inBuf, filesize) != filesize)
 	{
 		fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));
-// 		fclose(in);
 		xclose(fdIn);
 		utimes(inFile, times);
 		free(inBuf);
 		return;
 	}
-// 	fclose(in); in = NULL;
 	// keep our filedescriptor open to maintain the lock!
 #ifdef __APPLE__
 	if (backupFile)
@@ -853,14 +844,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	signal(SIGHUP, SIG_IGN);
 #endif
 	// we rewrite the data fork - it should contain 0 bytes if compression succeeded.
-// 	in = NULL;
 #ifdef __APPLE__
-// 	int fdIn = open(inFile, O_WRONLY|O_TRUNC|O_EXLOCK);
-// 	if (fdIn == -1)
-// 	{
-// 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-// 		goto bail;
-// 	}
+	// fdIn is still open
 	ftruncate(fdIn, 0);
 	lseek(fdIn, SEEK_SET, 0);
 	if (fchflags(fdIn, UF_COMPRESSED | inFileInfo->st_flags) < 0)
@@ -876,18 +861,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		{
 			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 		}
-// 		xclose(fdIn);
-// 		in = fopen(inFile, "w");
-// 		if (in == NULL)
-// 		{
-// 			fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-// 			if (backupName)
-// 			{
-// 				fprintf(stderr, "\ta backup is available as %s\n", backupName);
-// 				xfree(backupName);
-// 			}
-// 			goto bail;
-// 		}
 		if (write(fdIn, inBuf, filesize) != filesize)
 		{
 			fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
@@ -896,16 +869,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				fprintf(stderr, "\ta backup is available as %s\n", backupName);
 				xfree(backupName);
 			}
-// 			fclose(in);
 			xclose(fdIn)
 			goto bail;
 		}
-// 		fclose(in);
 		xclose(fdIn);
 		utimes(inFile, times);
 		goto bail;
 	}
-// 	fclose(in); in = NULL;
 // 	fsync(fdIn);
 	xclose(fdIn);
 #else
@@ -959,7 +929,7 @@ fail:;
 			{
 				fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 			}
-			in = fopen(inFile, "w");
+			FILE *in = fopen(inFile, "w");
 			if (in == NULL)
 			{
 				fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
@@ -975,7 +945,6 @@ fail:;
 			fclose(in);
 #endif
 		}
-		in = NULL;
 	}
 bail:
 #ifdef __APPLE__
@@ -989,10 +958,6 @@ bail:
 		locked = unLockParallelProcessorIO(worker);
 	}
 #endif
-	if (in)
-	{
-		fclose(in);
-	}
 	xclose(fdIn);
 	if (backupName)
 	{
@@ -1216,15 +1181,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 				goto bail;
 			}
 
-			{ FILE *cfp = fopen("/tmp/afsctool-last-zlib-rfork.bin", "w");
-				if (cfp) {
-					fwrite(inBuf, inRFLen, 1, cfp);
-					fclose(cfp);
-				} else {
-					fprintf(stderr, "%s: opening dump file failed (%s)\n", inFile, strerror(errno));
-				}
-			}
-
 			blockStart = inBuf + EndianU32_BtoN(*(UInt32 *) inBuf) + 0x4;
 			numBlocks = EndianU32_NtoL(*(UInt32 *) blockStart);
 			
@@ -1361,13 +1317,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		}
 		case CMP_LZVN_XATTR:
 		case CMP_LZVN_RESOURCE_FORK: {
-			{ FILE *cfp = fopen("/tmp/afsctool-last-lzvn-rfork.bin", "w");
-				if (cfp) {
-					fwrite(inBuf, inRFLen, 1, cfp);
-					fclose(cfp);
-				}
-			}
-
 	        if (
 #if __has_builtin(__builtin_available)
 				// we can do simplified runtime OS version detection: accept LZVN on 10.9 and up.
@@ -1389,6 +1338,15 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		}
 		case CMP_LZFSE_XATTR:
 		case CMP_LZFSE_RESOURCE_FORK: {
+#ifdef DEBUG
+			{ FILE *cfp = fopen("/tmp/afsctool-last-lzfse-rfork.bin", "w");
+				if (cfp) {
+					fwrite(inBuf, inRFLen, 1, cfp);
+					fclose(cfp);
+				}
+			}
+#endif
+
 	        if (
 #if __has_builtin(__builtin_available)
 				// we can do simplified runtime OS version detection: accept LZFSE on 10.11 and up.

@@ -90,6 +90,12 @@ int printVerbose = 0;
 static size_t maxOutBufSize = 0;
 void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp, bool onAPFS);
 
+#if !__has_builtin(__builtin_available)
+#	warning "Please use clang 5 or newer if you can"
+// determine the Darwin major version number
+static int darwinMajor = 0;
+#endif
+
 char* getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 {
 	static char sizeStr[128];
@@ -1134,21 +1140,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		fprintf(stderr, "%s: malloc error, unable to allocate output buffer (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
 		goto bail;
 	}
-
-#if !__has_builtin(__builtin_available)
-#	warning "Please use clang 5 or newer if you can"
-	// determine the Darwin major version number
-	static int darwinMajor = 0;
-	if (darwinMajor == 0)
-	{
-		FILE *uname = popen("uname -r", "r");
-		if (uname)
-		{
-			fscanf(uname, "%d", &darwinMajor);
-			fprintf(stderr, "darwinMajor=%d\n", darwinMajor);
-		}
-	}
-#endif
 
 	bool removeResourceFork = false;
 	bool doSimpleDecompression = false;
@@ -2380,6 +2371,18 @@ int afsctool (int argc, const char * argv[])
 		exit(EINVAL);
 	}
 
+#if !__has_builtin(__builtin_available)
+#	warning "Please use clang 5 or newer if you can"
+	// determine the Darwin major version number
+	{
+		FILE *uname = popen("uname -r", "r");
+		if (uname)
+		{
+			fscanf(uname, "%d", &darwinMajor);
+		}
+	}
+#endif
+
 	for (i = 1; i < argc && argv[i][0] == '-'; i++)
 	{
 		for (j = 1; j < strlen(argv[i]); j++)
@@ -2532,9 +2535,23 @@ int afsctool (int argc, const char * argv[])
 					if (strcasecmp(argv[i], "zlib") == 0) {
 						compressiontype = ZLIB;
 					} else if (strcasecmp(argv[i], "lzvn") == 0) {
-						compressiontype = LZVN;
+						if(
+#if __has_builtin(__builtin_available)
+							// we can do simplified runtime OS version detection: accept LZVN on 10.9 and up.
+							// NB: apparently this cannot be merged into a single if() with the strcasecmp().
+							__builtin_available(macOS 10.9, *)
+#else
+							darwinMajor >= 13
+#endif
+						) {
+							compressiontype = LZVN;
+						} else {
+							fprintf(stderr, "Sorry, LZVN compression is supported from OS X 10.9 and up\n");
+							exit(EINVAL);
+						}
 					} else {
 						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
+// 						fprintf(stderr, "\tLZFSE compression will be supported from OS X 10.11 and up (not yet implemented)\n");
 						printUsage();
 						exit(EINVAL);
 					}

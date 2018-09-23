@@ -58,6 +58,7 @@
 #include "afsctool_fullversion.h"
 
 #define xfree(x)	if((x)){free((x)); (x)=NULL;}
+#define xclose(x)	if((x)!=-1){close((x)); (x)=-1;}
 
 #if MAC_OS_X_VERSION_MIN_REQUIRED <= MAC_OS_X_VERSION_10_5
 	static bool legacy_output = true;
@@ -427,11 +428,18 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		locked = lockParallelProcessorIO(worker);
 	}
 #endif
-	in = fopen(inFile, "r+");
-	if (in == NULL)
+// 	in = fopen(inFile, "r+");
+// 	if (in == NULL)
+// 	{
+// 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
+// 		return;
+// 	}
+	// use open() with an exclusive lock so noone can modify the file while we're at it
+	int fdIn = open(inFile, O_RDWR|O_EXLOCK);
+	if (fdIn == -1)
 	{
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-		return;
+		goto bail;
 	}
 	inBuf = malloc(filesize);
 	if (inBuf == NULL)
@@ -441,15 +449,17 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		utimes(inFile, times);
 		return;
 	}
-	if (fread(inBuf, filesize, 1, in) != 1)
+	if (read(fdIn, inBuf, filesize) != filesize)
 	{
 		fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));
-		fclose(in);
+// 		fclose(in);
+		xclose(fdIn);
 		utimes(inFile, times);
 		free(inBuf);
 		return;
 	}
-	fclose(in); in = NULL;
+// 	fclose(in); in = NULL;
+	// keep our filedescriptor open to maintain the lock!
 #ifdef __APPLE__
 	if (backupFile)
 	{ int fd, bkNameLen;
@@ -792,7 +802,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, currBlock - outBuf + 50, 0,
 					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 				{
-					fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
+					fprintf(stderr, "%s: setxattr(%d): %s (%d)\n", inFile, fdIn, strerror(errno), __LINE__);
 					goto bail;
 				}
 #else
@@ -805,7 +815,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, outBufSize, 0,
 					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 				{
-					fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
+					fprintf(stderr, "%s: setxattr(%d): %s (%d)\n", inFile, fdIn, strerror(errno), __LINE__);
 					goto bail;
 				}
 #else
@@ -826,7 +836,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	// set the decmpfs attribute, which may or may not contain compressed data.
 	if (setxattr(inFile, DECMPFS_XATTR_NAME, outdecmpfsBuf, outdecmpfsSize, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 	{
-		fprintf(stderr, "%s: setxattr: %s\n", inFile, strerror(errno));
+		fprintf(stderr, "%s: setxattr(%d): %s (%d)\n", inFile, fdIn, strerror(errno), __LINE__);
 		goto bail;
 	}
 #else
@@ -843,14 +853,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	signal(SIGHUP, SIG_IGN);
 #endif
 	// we rewrite the data fork - it should contain 0 bytes if compression succeeded.
-	in = NULL;
+// 	in = NULL;
 #ifdef __APPLE__
-	int fdIn = open(inFile, O_WRONLY|O_TRUNC|O_EXLOCK);
-	if (fdIn == -1)
-	{
-		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-		goto bail;
-	}
+// 	int fdIn = open(inFile, O_WRONLY|O_TRUNC|O_EXLOCK);
+// 	if (fdIn == -1)
+// 	{
+// 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
+// 		goto bail;
+// 	}
+	ftruncate(fdIn, 0);
+	lseek(fdIn, SEEK_SET, 0);
 	if (fchflags(fdIn, UF_COMPRESSED | inFileInfo->st_flags) < 0)
 	{
 		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
@@ -864,19 +876,19 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		{
 			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 		}
-		close(fdIn);
-		in = fopen(inFile, "w");
-		if (in == NULL)
-		{
-			fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-			if (backupName)
-			{
-				fprintf(stderr, "\ta backup is available as %s\n", backupName);
-				xfree(backupName);
-			}
-			goto bail;
-		}
-		if (fwrite(inBuf, filesize, 1, in) != 1)
+// 		xclose(fdIn);
+// 		in = fopen(inFile, "w");
+// 		if (in == NULL)
+// 		{
+// 			fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
+// 			if (backupName)
+// 			{
+// 				fprintf(stderr, "\ta backup is available as %s\n", backupName);
+// 				xfree(backupName);
+// 			}
+// 			goto bail;
+// 		}
+		if (write(fdIn, inBuf, filesize) != filesize)
 		{
 			fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
 			if (backupName)
@@ -884,18 +896,19 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				fprintf(stderr, "\ta backup is available as %s\n", backupName);
 				xfree(backupName);
 			}
-			fclose(in);
+// 			fclose(in);
+			xclose(fdIn)
 			goto bail;
 		}
-		fclose(in);
+// 		fclose(in);
+		xclose(fdIn);
 		utimes(inFile, times);
 		goto bail;
 	}
 // 	fclose(in); in = NULL;
 // 	fsync(fdIn);
-	close(fdIn);
+	xclose(fdIn);
 #else
-	int fdIn;
 	fprintf(stderr, "# empty datafork and set UF_COMPRESSED flag\n");
 #endif
 	if (checkFiles)
@@ -909,14 +922,14 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			goto fail;
 		}
 		if (!(outBuf = reallocf(outBuf, filesize))) {
-			close(fdIn);
+			xclose(fdIn);
 			fprintf(stderr, "%s: failure reallocating buffer for validation; %s\n", inFile, strerror(errno));
 			goto fail;
 		}
 		bool sizeMismatch = false, readFailure = false, contentMismatch = false;
 		ssize_t checkRead= -2;
 		readFailure = (checkRead = read(fdIn, outBuf, filesize)) != filesize;
-		close(fdIn);
+		xclose(fdIn);
 		if ((sizeMismatch = inFileInfo->st_size != filesize) ||
 			readFailure ||
 			(contentMismatch = memcmp(outBuf, inBuf, filesize) != 0))
@@ -980,6 +993,7 @@ bail:
 	{
 		fclose(in);
 	}
+	xclose(fdIn);
 	if (backupName)
 	{
 		// a backupName is set and hasn't been unset because of a processing failure:

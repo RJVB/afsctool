@@ -50,7 +50,9 @@ Version 1.6.9 introduces two new options for the parallel compression mode:
 
 Version 1.7 introduces support for other compression types as added by Apple in OS X 10.9
 and later. Currently only LZVN support is fully implemented (though decompression of LZFSE
-should work if the OS supports it).
+should work if the OS supports it). Note that LZVN support requires a headerfile not
+currently installed by the original author's LZVN repo; use my fork instead and build it
+with cmake. --> https://github.com/RJVB/LZVN
 This version also makes the current ZLIB compression mode optional, that uses a compression
 buffer that is allocated all at once (and is thus almost always too large. The new default
 mode adopts the approach also used for LZVN compression, where the memory buffer is grown

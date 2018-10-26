@@ -14,3 +14,4 @@ script:
 - cmake ..
 - make V=1 VERBOSE=1
 - make V=1 VERBOSE=1 install/fast DESTDIR=../destroot
+- destroot/usr/local/bin/afsctool -cfvv -J2 -S -L .

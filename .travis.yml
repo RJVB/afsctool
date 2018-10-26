@@ -15,4 +15,4 @@ script:
 - make V=1 VERBOSE=1
 - make V=1 VERBOSE=1 install/fast DESTDIR=../destroot
 - ../destroot/usr/local/bin/afsctool -cfvv -J2 -S -L .
-- ../destroot/usr/local/bin/afsctool -fvvv /Applications
+- ../destroot/usr/local/bin/afsctool -vvv /Applications

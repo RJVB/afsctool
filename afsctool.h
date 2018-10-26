@@ -39,11 +39,7 @@
     typedef u_int64_t UInt64;
 #endif
 
-#ifdef HAS_DECMPFS
-#	include <sys/decmpfs.h>
-#else
-#   include "private/decmpfs.h"
-#endif
+#include "private/decmpfs.h"
 
 #ifdef __cplusplus
 extern "C" {

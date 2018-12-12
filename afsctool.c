@@ -29,6 +29,9 @@
 
 #ifdef __APPLE__
 #include <sys/attr.h>
+#ifndef NO_USE_MMAP
+	#include <sys/mman.h>
+#endif
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreServices/CoreServices.h>
@@ -47,6 +50,7 @@
 	#define OSSwapHostToLittleInt32(x)	htole32(x)
 	#define OSSwapHostToLittleInt64(x)	htole64(x)
 	#define OSSwapLittleToHostInt32(x)	le32toh(x)
+	#define NO_USE_MMAP
 #endif
 
 #include "afsctool.h"
@@ -57,8 +61,9 @@
 #endif
 #include "afsctool_fullversion.h"
 
-#define xfree(x)	if((x)){free((x)); (x)=NULL;}
-#define xclose(x)	if((x)!=-1){close((x)); (x)=-1;}
+#define xfree(x)		if((x)){free((x)); (x)=NULL;}
+#define xclose(x)		if((x)!=-1){close((x)); (x)=-1;}
+#define xmunmap(x,s)	if((x)){munmap((x),(s)); (x)=NULL;}
 
 #if MAC_OS_X_VERSION_MIN_REQUIRED <= MAC_OS_X_VERSION_10_5
 	static bool legacy_output = true;
@@ -332,7 +337,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	const int compblksize = 0x10000;
 	unsigned int numBlocks, outdecmpfsSize = 0;
 	void *inBuf = NULL, *outBuf = NULL, *outBufBlock = NULL, *outdecmpfsBuf = NULL, *currBlock = NULL, *blockStart = NULL;
-	long long int inBufPos, filesize = inFileInfo->st_size;
+	long long int inBufPos;
+	const long long int filesize = inFileInfo->st_size;
 	unsigned long int cmpedsize;
 	char *xattrnames, *curr_attr;
 	ssize_t xattrnamesize, outBufSize = 0;
@@ -440,6 +446,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 		goto bail;
 	}
+#ifdef NO_USE_MMAP
 	inBuf = malloc(filesize);
 	if (inBuf == NULL)
 	{
@@ -456,6 +463,20 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		free(inBuf);
 		return;
 	}
+#else
+	// get a private mmap. We rewrite to the file's attributes and/or resource fork,
+	// so there is no point in using a shared mapping where changes to the memory
+	// are mapped back to disk. The use of NOCACHE is experimental; if I understand
+	// the documentation correctly this just means that released memory can be
+	// reused more easily.
+	inBuf = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE|MAP_NOCACHE, fdIn, 0);
+	if (inBuf == MAP_FAILED) {
+		fprintf(stderr, "%s: Error m'mapping file (%s)\n", inFile, strerror(errno));
+		xclose(fdIn);
+		utimes(inFile, times);
+		return;
+	}
+#endif
 	// keep our filedescriptor open to maintain the lock!
 #ifdef __APPLE__
 	if (backupFile)
@@ -952,6 +973,21 @@ fail:;
 #endif
 		}
 	}
+// #ifndef NO_USE_MMAP
+// 	{
+// 		char *tFileName = NULL;
+// 		asprintf(&tFileName, "%s.%s", inFile, ".RestoreTest");
+// 		int fdTest = open(tFileName, O_WRONLY|O_CREAT|O_EXCL);
+// 		if (fdTest != -1) {
+// 			if (write(fdTest, inBuf, filesize) != filesize) {
+// 				fprintf(stderr, "%s: Error writing to testfile %s (%lld bytes; %s)\n", inFile, tFileName, filesize, strerror(errno));
+// 			}
+// 			close(fdTest);
+// 			chmod(tFileName, orig_mode);
+// 		}
+// 		xfree(tFileName)
+// 	}
+// #endif
 bail:
 #ifdef __APPLE__
 	utimes(inFile, times);
@@ -977,7 +1013,11 @@ bail:
 	signal(SIGINT, SIG_DFL);
 	signal(SIGHUP, SIG_DFL);
 #endif
+#ifdef NO_USE_MMAP
 	xfree(inBuf);
+#else
+	xmunmap(inBuf, filesize);
+#endif
 	xfree(outBuf);
 	xfree(outdecmpfsBuf);
 	xfree(outBufBlock);

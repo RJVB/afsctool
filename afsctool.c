@@ -1346,8 +1346,9 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			}
 			break;
 		}
-		case CMP_LZVN_XATTR:
 		case CMP_LZVN_RESOURCE_FORK: {
+			removeResourceFork = true;
+		case CMP_LZVN_XATTR:
 	        if (
 #if __has_builtin(__builtin_available)
 				// we can do simplified runtime OS version detection: accept LZVN on 10.9 and up.
@@ -1421,7 +1422,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			goto bail;
 		}
 		fclose(in);
-		removeResourceFork = true;
 	}
 
 	if (chflags(inFile, (~UF_COMPRESSED) & inFileInfo->st_flags) < 0)
@@ -1457,12 +1457,12 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 
 	if (removexattr(inFile, DECMPFS_XATTR_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 	{
-		fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
+		fprintf(stderr, "%s: removexattr DECMPFS_XATTR: %s\n", inFile, strerror(errno));
 	}
 	if (removeResourceFork && 
 		removexattr(inFile, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
 	{
-		fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
+		fprintf(stderr, "%s: removexattr XATTR_RESOURCEFORK: %s\n", inFile, strerror(errno));
 	}
 
 bail:

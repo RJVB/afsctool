@@ -50,7 +50,7 @@
 	#define OSSwapHostToLittleInt32(x)	htole32(x)
 	#define OSSwapHostToLittleInt64(x)	htole64(x)
 	#define OSSwapLittleToHostInt32(x)	le32toh(x)
-	#define NO_USE_MMAP
+	#define MAP_NOCACHE 				0
 #endif
 
 #include "afsctool.h"
@@ -349,6 +349,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	void *lzvn_WorkSpace = NULL;
 #endif
 	bool supportsLargeBlocks;
+#ifndef NO_USE_MMAP
+	bool useMmap = false;
+#endif
 
 	if (quitRequested)
 	{
@@ -426,8 +429,21 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	numBlocks = (filesize + compblksize - 1) / compblksize;
 	// TODO: make compression-type specific (as far as that's possible).
 	if ((filesize + 0x13A + (numBlocks * 9)) > 2147483647) {
-		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
-		return;
+#if !defined(NO_USE_MMAP)
+#	if defined(ZLIB_SINGLESHOT_OUTBUF)
+		if (comptype != ZLIB)
+#	endif
+		{
+			useMmap = true;
+		}
+#endif
+		if (!useMmap) {
+			fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
+			return;
+		}
+	} else if (filesize >= 64 * 1024 * 1024) {
+		// use a rather arbitrary threshold above which using mmap may be of interest
+		useMmap = true;
 	}
 
 #ifdef SUPPORT_PARALLEL
@@ -446,37 +462,39 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 		goto bail;
 	}
-#ifdef NO_USE_MMAP
-	inBuf = malloc(filesize);
-	if (inBuf == NULL)
+#ifndef NO_USE_MMAP
+	if (useMmap) {
+		// get a private mmap. We rewrite to the file's attributes and/or resource fork,
+		// so there is no point in using a shared mapping where changes to the memory
+		// are mapped back to disk. The use of NOCACHE is experimental; if I understand
+		// the documentation correctly this just means that released memory can be
+		// reused more easily.
+		inBuf = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE|MAP_NOCACHE, fdIn, 0);
+		if (inBuf == MAP_FAILED) {
+			fprintf(stderr, "%s: Error m'mapping file (size %lld; %s)\n", inFile, filesize, strerror(errno));
+			useMmap = false;
+		}
+	}
+	if (!useMmap)
 	{
-		fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, filesize, strerror(errno));
-		xclose(fdIn);
-		utimes(inFile, times);
-		return;
-	}
-	if (read(fdIn, inBuf, filesize) != filesize)
-	{
-		fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));
-		xclose(fdIn);
-		utimes(inFile, times);
-		free(inBuf);
-		return;
-	}
-#else
-	// get a private mmap. We rewrite to the file's attributes and/or resource fork,
-	// so there is no point in using a shared mapping where changes to the memory
-	// are mapped back to disk. The use of NOCACHE is experimental; if I understand
-	// the documentation correctly this just means that released memory can be
-	// reused more easily.
-	inBuf = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE|MAP_NOCACHE, fdIn, 0);
-	if (inBuf == MAP_FAILED) {
-		fprintf(stderr, "%s: Error m'mapping file (%s)\n", inFile, strerror(errno));
-		xclose(fdIn);
-		utimes(inFile, times);
-		return;
-	}
 #endif
+		inBuf = malloc(filesize);
+		if (inBuf == NULL)
+		{
+			fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, filesize, strerror(errno));
+			xclose(fdIn);
+			utimes(inFile, times);
+			return;
+		}
+		if (read(fdIn, inBuf, filesize) != filesize)
+		{
+			fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));
+			xclose(fdIn);
+			utimes(inFile, times);
+			free(inBuf);
+			return;
+		}
+	}
 	// keep our filedescriptor open to maintain the lock!
 #ifdef __APPLE__
 	if (backupFile)
@@ -1013,11 +1031,14 @@ bail:
 	signal(SIGINT, SIG_DFL);
 	signal(SIGHUP, SIG_DFL);
 #endif
-#ifdef NO_USE_MMAP
-	xfree(inBuf);
-#else
-	xmunmap(inBuf, filesize);
+#ifndef NO_USE_MMAP
+	if (useMmap) {
+		xmunmap(inBuf, filesize);
+	} else
 #endif
+	{
+		xfree(inBuf);
+	}
 	xfree(outBuf);
 	xfree(outdecmpfsBuf);
 	xfree(outBufBlock);

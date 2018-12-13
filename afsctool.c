@@ -471,7 +471,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			fprintf(stderr, "%s: Error m'mapping file (size %lld; %s)\n", inFile, filesize, strerror(errno));
 			useMmap = false;
 		} else {
-			madvise(inBuf, filesize, MADV_SEQUENTIAL);
+			madvise(inBuf, filesize, MADV_RANDOM);
 		}
 	}
 	if (!useMmap)
@@ -485,7 +485,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			utimes(inFile, times);
 			return;
 		}
-		madvise(inBuf, filesize, MADV_SEQUENTIAL);
+		madvise(inBuf, filesize, MADV_RANDOM);
 		if (read(fdIn, inBuf, filesize) != filesize)
 		{
 			fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));
@@ -1138,6 +1138,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 						fprintf(stderr, "%s: malloc error, unable to allocate input buffer\n", inFile);
 						goto bail;
 					}
+					madvise(inBuf, inRFLen, MADV_SEQUENTIAL);
 					do
 					{
 						getxattrret = getxattr(inFile, curr_attr, inBuf + RFpos, inRFLen - RFpos, RFpos, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
@@ -1216,6 +1217,7 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		fprintf(stderr, "%s: malloc error, unable to allocate output buffer (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
 		goto bail;
 	}
+	madvise(outBuf, filesize, MADV_SEQUENTIAL);
 
 	bool removeResourceFork = false;
 	bool doSimpleDecompression = false;
@@ -1233,7 +1235,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 				fprintf(stderr,
 					"%s: Decompression failed; resource fork required for compression type %d but none exists\n",
 					inFile, CMP_ZLIB_RESOURCE_FORK);
-				xfree(outBuf);
 				goto bail;
 			}
 			if (inRFLen < 0x13A ||
@@ -1244,7 +1245,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 					free(inBuf);
 				if (indecmpfsBuf != NULL)
 					free(indecmpfsBuf);
-				xfree(outBuf);
 				goto bail;
 			}
 
@@ -1254,13 +1254,11 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			if (inRFLen < EndianU32_BtoN(*(UInt32 *) inBuf) + 0x3A + (numBlocks * 8))
 			{
 				fprintf(stderr, "%s: Decompression failed; resource fork data is incomplete\n", inFile);
-				xfree(outBuf);
 				goto bail;
 			}
 			if (compblksize * (numBlocks - 1) + (filesize % compblksize) > filesize)
 			{
 				fprintf(stderr, "%s: Decompression failed; file size given in header is incorrect\n", inFile);
-				xfree(outBuf);
 				goto bail;
 			}
 			for (currBlock = 0; currBlock < numBlocks; currBlock++)
@@ -1268,7 +1266,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 				if (blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))) + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x8 + (currBlock * 8))) > inBuf + inRFLen)
 				{
 					fprintf(stderr, "%s: Decompression failed; resource fork data is incomplete\n", inFile);
-					xfree(outBuf);
 					goto bail;
 				}
 				if (currBlock + 1 != numBlocks)
@@ -1278,7 +1275,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 				if ((compblksize * currBlock) + uncmpedsize > filesize)
 				{
 					fprintf(stderr, "%s: Decompression failed; file size given in header is incorrect\n", inFile);
-					xfree(outBuf);
 					goto bail;
 				}
 				if ((*(unsigned char *) (blockStart + EndianU32_LtoN(*(UInt32 *) (blockStart + 0x4 + (currBlock * 8))))) == 0xFF)
@@ -1293,25 +1289,21 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 						if (uncmpret == Z_BUF_ERROR)
 						{
 							fprintf(stderr, "%s: Decompression failed; uncompressed data block too large\n", inFile);
-							xfree(outBuf);
 							goto bail;
 						}
 						else if (uncmpret == Z_DATA_ERROR)
 						{
 							fprintf(stderr, "%s: Decompression failed; compressed data block is corrupted\n", inFile);
-							xfree(outBuf);
 							goto bail;
 						}
 						else if (uncmpret == Z_MEM_ERROR)
 						{
 							fprintf(stderr, "%s: Decompression failed; out of memory\n", inFile);
-							xfree(outBuf);
 							goto bail;
 						}
 						else
 						{
 							fprintf(stderr, "%s: Decompression failed; an error occurred during decompression\n", inFile);
-							xfree(outBuf);
 							goto bail;
 						}
 					}
@@ -1319,7 +1311,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 				if (uncmpedsize != ((filesize - (currBlock * compblksize) < compblksize) ? filesize - (currBlock * compblksize) : compblksize))
 				{
 					fprintf(stderr, "%s: Decompression failed; uncompressed data block too small\n", inFile);
-					xfree(outBuf);
 					goto bail;
 				}
 			}
@@ -1334,7 +1325,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 				fprintf(stderr,
 					"%s: Decompression failed; compression type %d expects compressed data in extended attribute com.apple.decmpfs but none exists\n",
 					inFile, CMP_ZLIB_XATTR);
-				xfree(outBuf);
 				goto bail;
 			}
 			uncmpedsize = filesize;
@@ -1351,25 +1341,21 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 					if (uncmpret == Z_BUF_ERROR)
 					{
 						fprintf(stderr, "%s: Decompression failed; uncompressed data too large\n", inFile);
-						xfree(outBuf);
 						goto bail;
 					}
 					else if (uncmpret == Z_DATA_ERROR)
 					{
 						fprintf(stderr, "%s: Decompression failed; compressed data is corrupted\n", inFile);
-						xfree(outBuf);
 						goto bail;
 					}
 					else if (uncmpret == Z_MEM_ERROR)
 					{
 						fprintf(stderr, "%s: Decompression failed; out of memory\n", inFile);
-						xfree(outBuf);
 						goto bail;
 					}
 					else
 					{
 						fprintf(stderr, "%s: Decompression failed; an error occurred during decompression\n", inFile);
-						xfree(outBuf);
 						goto bail;
 					}
 				}
@@ -1377,7 +1363,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			if (uncmpedsize != filesize)
 			{
 				fprintf(stderr, "%s: Decompression failed; uncompressed data block too small\n", inFile);
-				xfree(outBuf);
 				goto bail;
 			}
 			break;
@@ -1399,7 +1384,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			{
 				fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
 						inFile, compressionTypeName(compressionType));
-				xfree(outBuf);
 				goto bail;
 			}
 			break;
@@ -1429,7 +1413,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			{
 				fprintf(stderr, "%s: Decompression failed; unsupported compression type %s\n",
 						inFile, compressionTypeName(compressionType));
-				xfree(outBuf);
 				goto bail;
 			}
 			break;
@@ -1437,7 +1420,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		default: {
 			fprintf(stderr, "%s: Decompression failed; unknown compression type %s\n",
 					inFile, compressionTypeName(compressionType));
-			xfree(outBuf);
 			goto bail;
 			break;
 		}
@@ -1463,7 +1445,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 	if (chflags(inFile, (~UF_COMPRESSED) & inFileInfo->st_flags) < 0)
 	{
 		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
-		xfree(outBuf);
 		goto bail;
 	}
 
@@ -1473,7 +1454,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		if (chflags(inFile, UF_COMPRESSED & inFileInfo->st_flags) < 0)
 			fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
-		xfree(outBuf);
 		goto bail;
 	}
 
@@ -1485,7 +1465,6 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 		{
 			fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
 		}
-		xfree(outBuf);
 		goto bail;
 	}
 

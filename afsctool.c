@@ -27,9 +27,7 @@
 #	include <FastCompression.h>
 #endif
 
-#ifndef NO_USE_MMAP
-#	include <sys/mman.h>
-#endif
+#include <sys/mman.h>
 
 #ifdef __APPLE__
 #	include <sys/attr.h>
@@ -472,6 +470,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		if (inBuf == MAP_FAILED) {
 			fprintf(stderr, "%s: Error m'mapping file (size %lld; %s)\n", inFile, filesize, strerror(errno));
 			useMmap = false;
+		} else {
+			madvise(inBuf, filesize, MADV_SEQUENTIAL);
 		}
 	}
 	if (!useMmap)
@@ -485,6 +485,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			utimes(inFile, times);
 			return;
 		}
+		madvise(inBuf, filesize, MADV_SEQUENTIAL);
 		if (read(fdIn, inBuf, filesize) != filesize)
 		{
 			fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));

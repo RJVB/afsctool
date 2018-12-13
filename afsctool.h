@@ -73,6 +73,8 @@ struct folder_info
 	long long int num_folders;
 	long long int num_hard_link_folders;
 	long long int maxSize;
+    // set by compressFile():
+	long long int data_compressed_size;
 	int print_info;
     compression_type compressiontype;
 	int compressionlevel;

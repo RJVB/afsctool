@@ -81,12 +81,18 @@ void FileEntry::compress(FileProcessor *worker, ParallelFileProcessor *PP)
 	if( PP->verbose() > 2){
 		fprintf( stderr, "[%d] %s", worker->processorID(), fileName.c_str() ); fflush(stderr);
 	}
+	folderInfo->data_compressed_size = -1;
 	compressFile( fileName.c_str(), &fileInfo, folderInfo, worker );
 	if( PP->verbose() > 2){
 		fputs( " .", stderr ); fflush(stderr);
 	}
 	if( PP->verbose() ){
 		compressedSize = (PP)? process_file( fileName.c_str(), NULL, &fileInfo, &PP->jobInfo ) : 0;
+#ifndef __APPLE__
+		if (folderInfo->data_compressed_size != -1) {
+			compressedSize = folderInfo->data_compressed_size;
+		}
+#endif
 		if( PP->verbose() > 2){
 			fputs( " .\n", stderr ); fflush(stderr);
 		}

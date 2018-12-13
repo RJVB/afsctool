@@ -27,14 +27,15 @@
 #	include <FastCompression.h>
 #endif
 
-#ifdef __APPLE__
-#include <sys/attr.h>
 #ifndef NO_USE_MMAP
-	#include <sys/mman.h>
+#	include <sys/mman.h>
 #endif
 
-#include <CoreFoundation/CoreFoundation.h>
-#include <CoreServices/CoreServices.h>
+#ifdef __APPLE__
+#	include <sys/attr.h>
+
+#	include <CoreFoundation/CoreFoundation.h>
+#	include <CoreServices/CoreServices.h>
 #else
 	// for cross-platform debugging only!
 	#include <bsd/stdlib.h>
@@ -349,9 +350,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	void *lzvn_WorkSpace = NULL;
 #endif
 	bool supportsLargeBlocks;
-#ifndef NO_USE_MMAP
 	bool useMmap = false;
-#endif
 
 	if (quitRequested)
 	{
@@ -476,8 +475,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 	}
 	if (!useMmap)
-	{
 #endif
+	{
 		inBuf = malloc(filesize);
 		if (inBuf == NULL)
 		{
@@ -550,10 +549,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 #endif
 
-	outdecmpfsBuf = malloc(3802);
+	outdecmpfsBuf = malloc(MAX_DECMPFS_XATTR_SIZE);
 	if (outdecmpfsBuf == NULL)
 	{
-		fprintf(stderr, "%s: malloc error, unable to allocate xattr buffer (3802 bytes; %s)\n", inFile, strerror(errno));
+		fprintf(stderr, "%s: malloc error, unable to allocate xattr buffer (%d bytes; %s)\n",
+				inFile, MAX_DECMPFS_XATTR_SIZE, strerror(errno));
 		utimes(inFile, times);
 		goto bail;
 	}
@@ -760,13 +760,14 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			cmpedsize = ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos;
 			cmpedsize++;
 		}
-		if (((cmpedsize + outdecmpfsSize) <= 3802) && (numBlocks <= 1))
+		if (((cmpedsize + outdecmpfsSize) <= MAX_DECMPFS_XATTR_SIZE) && (numBlocks <= 1))
 		{
 			// store in directly into the attribute instead of using the resource fork.
 			// *(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.xattr);
 			decmpfsAttr->compression_type = OSSwapHostToLittleInt32(compressionType.xattr);
 			memcpy(outdecmpfsBuf + outdecmpfsSize, outBufBlock, cmpedsize);
 			outdecmpfsSize += cmpedsize;
+			folderinfo->data_compressed_size = outdecmpfsSize;
 			break;
 		}
 		if (currBlockOffset + cmpedsize <= currBlockLen) {
@@ -842,8 +843,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 					goto bail;
 				}
 #else
-				fprintf(stderr, "# setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n", outBuf, currBlock - outBuf + 50);
+				if (printVerbose > 2) {
+					fprintf(stderr, "# setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n",
+							outBuf, currBlock - outBuf + 50);
+				}
 #endif
+				folderinfo->data_compressed_size = currBlock - outBuf + 50;
 				break;
 #ifdef HAS_LZVN
 			case LZVN: {
@@ -855,8 +860,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 					goto bail;
 				}
 #else
-				fprintf(stderr, "# setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n", outBuf, outBufSize);
+				if (printVerbose > 2) {
+					fprintf(stderr, "# setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n",
+							outBuf, outBufSize);
+				}
 #endif
+				folderinfo->data_compressed_size = outBufSize;
 				break;
 			}
 #endif
@@ -876,7 +885,10 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		goto bail;
 	}
 #else
-	fprintf(stderr, "# setxattr(DECMPFS_XATTR_NAME) buf=%p len=%u\n", outdecmpfsBuf, outdecmpfsSize);
+	if (printVerbose > 2) {
+		fprintf(stderr, "# setxattr(DECMPFS_XATTR_NAME) buf=%p len=%u\n",
+				outdecmpfsBuf, outdecmpfsSize);
+	}
 #endif
 
 #ifdef SUPPORT_PARALLEL
@@ -921,11 +933,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		utimes(inFile, times);
 		goto bail;
 	}
+#else
+	if (printVerbose > 2) {
+		fprintf(stderr, "# empty datafork and set UF_COMPRESSED flag\n");
+	}
+#endif
 // 	fsync(fdIn);
 	xclose(fdIn);
-#else
-	fprintf(stderr, "# empty datafork and set UF_COMPRESSED flag\n");
-#endif
 	if (checkFiles)
 	{
 		lstat(inFile, inFileInfo);

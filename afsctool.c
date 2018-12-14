@@ -795,6 +795,22 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 #endif
 	free(outBufBlock); outBufBlock = NULL;
 
+#ifdef SUPPORT_PARALLEL
+	// 20160928: the actual rewrite of the file is never done in parallel
+	if( worker ){
+		locked = lockParallelProcessorIO(worker);
+	}
+#else
+	signal(SIGINT, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
+#endif
+
+#ifdef __APPLE__
+	// fdIn is still open
+	ftruncate(fdIn, 0);
+	lseek(fdIn, SEEK_SET, 0);
+#endif
+
 	//if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
 	if (OSSwapLittleToHostInt32(decmpfsAttr->compression_type) == compressionType.resourceFork)
 	{
@@ -892,20 +908,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 #endif
 
-#ifdef SUPPORT_PARALLEL
-	// 20160928: the actual rewrite of the file is never done in parallel
-	if( worker ){
-		locked = lockParallelProcessorIO(worker);
-	}
-#else
-	signal(SIGINT, SIG_IGN);
-	signal(SIGHUP, SIG_IGN);
-#endif
 	// we rewrite the data fork - it should contain 0 bytes if compression succeeded.
 #ifdef __APPLE__
-	// fdIn is still open
-	ftruncate(fdIn, 0);
-	lseek(fdIn, SEEK_SET, 0);
 	if (fchflags(fdIn, UF_COMPRESSED | inFileInfo->st_flags) < 0)
 	{
 		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
@@ -944,6 +948,10 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	if (checkFiles)
 	{
 		lstat(inFile, inFileInfo);
+		bool sizeMismatch = inFileInfo->st_size != filesize, readFailure = false, contentMismatch = false;
+		ssize_t checkRead= -2;
+		bool outBufMMapped = false;
+		errno = 0;
 		fdIn = open(inFile, O_RDONLY|O_EXLOCK);
 		if (fdIn == -1)
 		{
@@ -951,23 +959,41 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			// we don't bail here, we fail (= restore the backup).
 			goto fail;
 		}
-		if (!(outBuf = reallocf(outBuf, filesize))) {
-			xclose(fdIn);
-			fprintf(stderr, "%s: failure reallocating buffer for validation; %s\n", inFile, strerror(errno));
-			goto fail;
+		if (!sizeMismatch) {
+#ifndef NO_USE_MMAP
+			xfree(outBuf);
+			outBuf = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE|MAP_NOCACHE, fdIn, 0);
+			outBufMMapped = true;
+#else
+			outBuf = reallocf(outBuf, filesize);
+#endif
+			if (!outBuf) {
+				xclose(fdIn);
+				fprintf(stderr, "%s: failure reallocating buffer for validation; %s\n", inFile, strerror(errno));
+				goto fail;
+			}
+			// this should be appropriate for simply reading into and comparing:
+			madvise(inBuf, filesize, MADV_SEQUENTIAL);
+			madvise(outBuf, filesize, MADV_SEQUENTIAL);
+			if (!outBufMMapped) {
+				errno = 0;
+				readFailure = (checkRead = read(fdIn, outBuf, filesize)) != filesize;
+			} else {
+				readFailure = false;
+				checkRead = filesize;
+			}
 		}
-		bool sizeMismatch = false, readFailure = false, contentMismatch = false;
-		ssize_t checkRead= -2;
-		readFailure = (checkRead = read(fdIn, outBuf, filesize)) != filesize;
 		xclose(fdIn);
-		if ((sizeMismatch = inFileInfo->st_size != filesize) ||
-			readFailure ||
-			(contentMismatch = memcmp(outBuf, inBuf, filesize) != 0))
+		if (sizeMismatch || readFailure
+			|| (contentMismatch = memcmp(outBuf, inBuf, filesize) != 0))
 		{
+			fprintf(stderr, "\tsize mismatch=%d read=%zd failure=%d content mismatch=%d (%s)\n",
+				sizeMismatch, checkRead, readFailure, contentMismatch, strerror(errno));
 fail:;
 			printf("%s: Compressed file check failed, reverting file changes\n", inFile);
-			fprintf(stderr, "\tsize mismatch=%d read=%zd failure=%d content mismatch=%d\n",
-				sizeMismatch, checkRead, readFailure, contentMismatch);
+			if (outBufMMapped) {
+				xmunmap(outBuf, filesize);
+			}
 #ifdef __APPLE__
 			if (backupName)
 			{
@@ -1004,6 +1030,9 @@ fail:;
 			}
 			fclose(in);
 #endif
+		}
+		if (outBufMMapped) {
+			xmunmap(outBuf, filesize);
 		}
 	}
 // #ifndef NO_USE_MMAP

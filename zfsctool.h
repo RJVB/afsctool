@@ -109,14 +109,10 @@ struct filetype_info {
 	long long int num_hard_link_files;
 };
 
-#ifdef SUPPORT_PARALLEL
-#	ifdef __cplusplus
+#ifdef __cplusplus
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker = NULL);
-#	else
-extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker);
-#	endif
 #else
-extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *ignored);
+extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker);
 #endif
 extern long long process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo);
 extern int zfsctool(int argc, const char *argv[]);

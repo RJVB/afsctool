@@ -26,7 +26,6 @@
 #include <AvailabilityMacros.h>
 #include <MacTypes.h>
 #else
-    #include <sys/types.h>
     #define false 0
     #define FALSE 0
     #define true !false

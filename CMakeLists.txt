@@ -57,14 +57,18 @@ if(GIT_FULL_VERSION)
 endif()
 configure_file(afsctool_fullversion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/afsctool_fullversion.h)
 
-add_executable(afsctool
-    afsctool.c
-    main.cpp
+add_library(PP OBJECT
     ParallelProcess.cpp
     Thread/Thread.cpp
     CritSectEx/CritSectEx.cpp
     CritSectEx/msemul.cpp
     CritSectEx/timing.c
+)
+
+add_executable(afsctool
+    afsctool.c
+    main.cpp
+    $<TARGET_OBJECTS:PP>
 )
 if(HFSCOMPRESS_TO_ZFS)
     set_source_files_properties(afsctool.c PROPERTIES COMPILE_DEFINITIONS HFSCOMPRESS_TO_ZFS)

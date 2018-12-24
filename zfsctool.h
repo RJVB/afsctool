@@ -69,7 +69,6 @@ struct folder_info
 	int filetypeslistsize;
 	bool invert_filetypelist;
 	bool backup_file;
-    bool onAPFS;
 #ifdef __cplusplus
 public:
 	folder_info()

@@ -31,7 +31,7 @@
 	#include <sys/stat.h>
 	#include <fcntl.h>
 	#define O_EXLOCK 0
-	#define MAP_NOCACHE 				0
+	#define MAP_NOCACHE 0
 #endif
 
 #include "afsctool.h"
@@ -57,7 +57,7 @@ const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 102
 
 int printVerbose = 0;
 static size_t maxOutBufSize = 0;
-void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp, bool onAPFS);
+void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp);
 
 #if !__has_builtin(__builtin_available)
 #	warning "Please use clang 5 or newer if you can"
@@ -161,7 +161,7 @@ static void signal_handler(int sig)
 	stopParallelProcessor(PP);
 }
 
-bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, bool *isAPFS)
+bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
 {
 	struct statfs fsInfo;
 	errno = 0;
@@ -169,7 +169,6 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, bool *isAPF
 	// TODO
 	// this function needs to call `zfs list $inFile` to see if the file is on a ZFS dataset
 	// if the same info isn't available via fsInfo.
-	// Also: get rid of the isAPFS option
 	return (ret >= 0 && S_ISREG(inFileInfo->st_mode));
 }
 
@@ -240,7 +239,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	// is there no equivalent?
 #endif
 	
-	if (!fileIsCompressable(inFile, inFileInfo, &folderinfo->onAPFS)){
+	if (!fileIsCompressable(inFile, inFileInfo)){
 		return;
 	}
 	if (filesize > maxSize && maxSize != 0){
@@ -416,252 +415,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		chmod(backupName, orig_mode);
 	}
 #endif
+
+	// FIXME
 	if( exclusive_io && worker ){
 		locked = unLockParallelProcessorIO(worker);
 	}
-
-	outdecmpfsBuf = malloc(MAX_DECMPFS_XATTR_SIZE);
-	if (outdecmpfsBuf == NULL)
-	{
-		fprintf(stderr, "%s: malloc error, unable to allocate xattr buffer (%d bytes; %s)\n",
-				inFile, MAX_DECMPFS_XATTR_SIZE, strerror(errno));
-		utimes(inFile, times);
-		goto bail;
-	}
-
-	struct compressionType {
-		UInt32 xattr, resourceFork;
-	} compressionType;
-	uLong zlib_EstimatedCompressedChunkSize;
-#ifdef HAS_LZVN
-	size_t lzvn_EstimatedCompressedSize;
-
-	lzvn_chunk_table *chunkTable = (lzvn_chunk_table*) outBuf;
-	ssize_t chunkTableByteSize;
-#endif
-
-	switch (comptype) {
-		case ZLIB: {
-			cmpedsize = zlib_EstimatedCompressedChunkSize = compressBound(compblksize);
-			struct compressionType t = {CMP_ZLIB_XATTR, CMP_ZLIB_RESOURCE_FORK};
-			compressionType = t;
-#ifdef ZLIB_SINGLESHOT_OUTBUF
-			outBufSize = filesize + 0x13A + (numBlocks * 9);
-#else
-			outBufSize = 0x104 + sizeof(UInt32) + numBlocks * 8;
-#endif
-#define SET_BLOCKSTART()	blockStart = outBuf + 0x104
-			outBuf = malloc(outBufSize);
-			break;
-		}
-#ifdef HAS_LZVN
-		case LZVN: {
-			cmpedsize = lzvn_EstimatedCompressedSize = MAX(lzvn_encode_work_size(), compblksize);
-			lzvn_WorkSpace = malloc(cmpedsize);
-			// for this compressor we will let the outBuf grow incrementally. Slower,
-			// but use only as much memory as required.
-			outBuf = calloc(numBlocks, sizeof(chunkTable));
-			chunkTable = outBuf;
-			if (!lzvn_WorkSpace || !chunkTable) {
-				fprintf(stderr,
-						"%s: malloc error, unable to allocate %lu bytes for lzvn workspace or %u element chunk table(%s)\n",
-						inFile, cmpedsize, numBlocks, strerror(errno));
-				utimes(inFile, times);
-				goto bail;
-			}
-			struct compressionType t = {CMP_LZVN_XATTR, CMP_LZVN_RESOURCE_FORK};
-			compressionType = t;
-			outBufSize = chunkTableByteSize = numBlocks * sizeof(chunkTable);
-			chunkTable[0] = chunkTableByteSize;
-			break;
-		}
-#endif
-		default:
-			fprintf(stderr, "%s: unsupported compression type %d bytes\n",
-					inFile, comptype);
-			utimes(inFile, times);
-			goto bail;
-			break;
-	}
-
-	if (outBuf == NULL && outBufSize != 0)
-	{
-		fprintf(stderr, "%s: malloc error, unable to allocate output buffer of %lu bytes (%s)\n",
-				inFile, outBufSize, strerror(errno));
-		utimes(inFile, times);
-		goto bail;
-	}
-
-	outBufBlock = malloc(cmpedsize);
-	if (outBufBlock == NULL)
-	{
-		fprintf(stderr, "%s: malloc error, unable to allocate compression buffer of %lu bytes (%s)\n",
-				inFile, cmpedsize, strerror(errno));
-		utimes(inFile, times);
-		goto bail;
-	}
-	// The header of the compression resource fork (16 bytes):
-	// compression magic number
-	decmpfs_disk_header *decmpfsAttr = (decmpfs_disk_header*) outdecmpfsBuf;
-	decmpfsAttr->compression_magic = OSSwapHostToLittleInt32(cmpf);
-	// the compression type: 4 == compressed data in the resource fork.
-	// FWIW, libarchive has the following comment in archive_write_disk_posix.c :
-	//* If the compressed size is smaller than MAX_DECMPFS_XATTR_SIZE [3802]
-	//* and the block count in the file is only one, store compressed
-	//* data to decmpfs xattr instead of the resource fork.
-	// We do the same below.
-	decmpfsAttr->compression_type = OSSwapHostToLittleInt32(compressionType.resourceFork);
-	// the uncompressed filesize
-	decmpfsAttr->uncompressed_size = OSSwapHostToLittleInt64(filesize);
-	// outdecmpfsSize = 0x10;
-	outdecmpfsSize = sizeof(decmpfs_disk_header);
-
-	unsigned long currBlockLen, currBlockOffset;
-	switch (comptype) {
-		case ZLIB:
-			*(UInt32 *) outBuf = OSSwapHostToBigInt32(0x100);
-			*(UInt32 *) (outBuf + 12) = OSSwapHostToBigInt32(0x32);
-			memset(outBuf + 16, 0, 0xF0);
-			SET_BLOCKSTART();
-			// block table: numBlocks + offset,blocksize pairs for each of the blocks
-			*(UInt32 *) blockStart = OSSwapHostToLittleInt32(numBlocks);
-			// actual compressed data starts after the block table
-			currBlock = blockStart + sizeof(UInt32) + (numBlocks * 8);
-			currBlockLen = outBufSize - (currBlock - outBuf);
-			supportsLargeBlocks = true;
-			break;
-#ifdef HAS_LZVN
-		case LZVN:
-			supportsLargeBlocks = false;
-			break;
-#endif
-		default:
-			// noop
-			break;
-	}
-	int blockNr;
-
-	// chunking loop that compresses the 64K chunks and handles the result(s).
-	// Note that LZVN appears not to be chunked like that (maybe inside lzvn_encode()?)
-	// TODO: refactor and merge with the switch() above if LZFSE compression doesn't need chunking either.
-	for (inBufPos = 0, blockNr = 0, currBlockOffset = 0
-		; inBufPos < filesize
-		; inBufPos += compblksize, currBlock += cmpedsize, currBlockOffset += cmpedsize, ++blockNr)
-	{
-		void *cursor = inBuf + inBufPos;
-		uLong bytesAfterCursor = ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos;
-		switch (comptype) {
-			case ZLIB:
-				// reset cmpedsize; it may be changed by compress2().
-				cmpedsize = zlib_EstimatedCompressedChunkSize;
-				if (compress2(outBufBlock, &cmpedsize, cursor, bytesAfterCursor, compressionlevel) != Z_OK)
-				{
-					utimes(inFile, times);
-					goto bail;
-				}
-#ifndef ZLIB_SINGLESHOT_OUTBUF
-				if (currBlockOffset == 0) {
-					currBlockOffset = outBufSize;
-				} 
-				outBufSize += cmpedsize;
-				if (!(outBuf = reallocf(outBuf, outBufSize + 1))) {
-					fprintf(stderr, "%s: malloc error, unable to increase output buffer to %lu bytes (%s)\n",
-							inFile, outBufSize, strerror(errno));
-					utimes(inFile, times);
-					goto bail;
-				}
-				// update this one!
-				SET_BLOCKSTART();
-				currBlock = outBuf + currBlockOffset;
-				currBlockLen = outBufSize;
-#endif
-				break;
-#ifdef HAS_LZVN
-			case LZVN:{
-				UInt32 prevLast = ((UInt32*)outBufBlock)[cmpedsize/sizeof(UInt32)-1];
-				cmpedsize =
-					lzvn_encode(outBufBlock, lzvn_EstimatedCompressedSize, cursor, bytesAfterCursor, lzvn_WorkSpace);
-				if (cmpedsize <= 0)
-				{
-					fprintf( stderr, "%s: lzvn compression failed on chunk #%d\n", inFile, blockNr);
-					utimes(inFile, times);
-					goto bail;
-				}
-				// next offset will start at this offset
-				if (blockNr < numBlocks) {
-					chunkTable[blockNr+1] = chunkTable[blockNr] + cmpedsize;
-				}
-				if (currBlockOffset == 0) {
-					currBlockOffset = outBufSize;
-				} 
-				outBufSize += cmpedsize;
-				if (!(outBuf = reallocf(outBuf, outBufSize))) {
-					fprintf(stderr, "%s: malloc error, unable to increase output buffer to %lu bytes (%s)\n",
-							inFile, outBufSize, strerror(errno));
-					utimes(inFile, times);
-					goto bail;
-				}
-				// update this one!
-				chunkTable = outBuf;
-				currBlock = outBuf + currBlockOffset;
-				currBlockLen = outBufSize;
-				if (blockNr > 1 && ((UInt32*)currBlock)[-1] != prevLast) {
-					fprintf(stderr, "%s: warning, possible chunking overlap: prevLast=%lu currBlock[-1]=%lu currBlock[0]=%lu\n",
-							inFile, prevLast, ((UInt32*)currBlock)[-sizeof(UInt32)], ((UInt32*)currBlock)[0]);
-				}
-				break;
-			}
-#endif
-			default:
-				// noop
-				break;
-		}
-		if (supportsLargeBlocks && cmpedsize > (((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos))
-		{
-			if (!allowLargeBlocks && (((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos) == compblksize)
-			{
-				if (printVerbose >= 2) {
-					fprintf(stderr, "%s: file has a compressed chunk that's larger than the original chunk; -L to compress\n", inFile);
-				}
-				utimes(inFile, times);
-				goto bail;
-			}
-			*(unsigned char *) outBufBlock = 0xFF;
-			memcpy(outBufBlock + 1, inBuf + inBufPos, ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos);
-			cmpedsize = ((filesize - inBufPos) > compblksize) ? compblksize : filesize - inBufPos;
-			cmpedsize++;
-		}
-		if (((cmpedsize + outdecmpfsSize) <= MAX_DECMPFS_XATTR_SIZE) && (numBlocks <= 1))
-		{
-			// store in directly into the attribute instead of using the resource fork.
-			// *(UInt32 *) (outdecmpfsBuf + 4) = EndianU32_NtoL(compressionType.xattr);
-			decmpfsAttr->compression_type = OSSwapHostToLittleInt32(compressionType.xattr);
-			memcpy(outdecmpfsBuf + outdecmpfsSize, outBufBlock, cmpedsize);
-			outdecmpfsSize += cmpedsize;
-			folderinfo->data_compressed_size = outdecmpfsSize;
-			break;
-		}
-		if (currBlockOffset + cmpedsize <= currBlockLen) {
-			memcpy(currBlock, outBufBlock, cmpedsize);
-		} else {
-			fprintf( stderr, "%s: result buffer overrun at chunk #%d (%lu >= %lu)\n", inFile, blockNr,
-				currBlockOffset + cmpedsize, currBlockLen);
-			utimes(inFile, times);
-			goto bail;
-		}
-		switch (comptype) {
-			case ZLIB:
-				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x4) = OSSwapHostToLittleInt32(currBlock - blockStart);
-				*(UInt32 *) (blockStart + ((inBufPos / compblksize) * 8) + 0x8) = OSSwapHostToLittleInt32(cmpedsize);
-				break;
-			default:
-				// noop
-				break;
-		}
-	}
-	// deallocate memory that isn't needed anymore.
-	free(outBufBlock); outBufBlock = NULL;
-
 	// 20160928: the actual rewrite of the file is never done in parallel
 	if( worker ){
 		locked = lockParallelProcessorIO(worker);
@@ -671,41 +429,17 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	ftruncate(fdIn, 0);
 	lseek(fdIn, SEEK_SET, 0);
 
-	// we rewrite the data fork - it should contain 0 bytes if compression succeeded.
-#ifdef __APPLE__
-	if (fchflags(fdIn, UF_COMPRESSED | inFileInfo->st_flags) < 0)
+	if (write(fdIn, inBuf, filesize) != filesize)
 	{
-		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
-		if (fremovexattr(fdIn, DECMPFS_XATTR_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
+		fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
+		if (backupName)
 		{
-			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
+			fprintf(stderr, "\ta backup is available as %s\n", backupName);
+			xfree(backupName);
 		}
-// 		if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK &&
-		if (OSSwapLittleToHostInt32(decmpfsAttr->compression_type) == compressionType.resourceFork &&
-			fremovexattr(fdIn, XATTR_RESOURCEFORK_NAME, XATTR_NOFOLLOW | XATTR_SHOWCOMPRESSION) < 0)
-		{
-			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
-		}
-		if (write(fdIn, inBuf, filesize) != filesize)
-		{
-			fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
-			if (backupName)
-			{
-				fprintf(stderr, "\ta backup is available as %s\n", backupName);
-				xfree(backupName);
-			}
-			xclose(fdIn)
-			goto bail;
-		}
-		xclose(fdIn);
-		utimes(inFile, times);
+		xclose(fdIn)
 		goto bail;
 	}
-#else
-	if (printVerbose > 2) {
-		fprintf(stderr, "# empty datafork and set UF_COMPRESSED flag\n");
-	}
-#endif
 // 	fsync(fdIn);
 	xclose(fdIn);
 	if (checkFiles)
@@ -1053,7 +787,7 @@ struct filetype_info* getFileTypeInfo(const char *filepath, const char *filetype
 	return &folderinfo->filetypes[left_pos];
 }
 
-void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp, bool onAPFS)
+void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp)
 {
 	char *xattrnames, *curr_attr, *filetype;
 	ssize_t xattrnamesize, xattrssize = 0, xattrsize, RFsize = 0, compattrsize = 0;
@@ -1064,11 +798,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 	
 	printf("%s:\n", filepath);
 
-	if ((int)onAPFS == -1) {
-		fileIsCompressable(filepath, fileinfo, &onAPFS);
-	}
-
-	// TODO: figure out how to determine the compressed filesize on ZFS
+	// compressed==on-disk filesize: fileinfo->st_blocks * (S_BLKSIZE)?S_BLKSIZE:512
 #ifdef __APPLE__
 	if ((fileinfo->st_flags & UF_COMPRESSED) == 0)
 #else
@@ -1078,7 +808,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		if (appliedcomp)
 			printf("Unable to compress file.\n");
 		else
-			printf("File is not HFS+/APFS compressed.\n");
+			printf("File is not compressed.\n");
 		if (hasRF)
 		{
 			printf("File data fork size: %lld bytes\n", fileinfo->st_size);
@@ -1106,10 +836,6 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
 		filesize = roundToBlkSize(filesize + RFsize, fileinfo);
 		filesize += compattrsize + xattrssize;
-		if (!onAPFS) {
-			printf("Approximate overhead of extended HFS+ attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
-			filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
-		}
 		printf("Approximate total file size (data fork + resource fork + EA + EA overhead + file overhead): %s\n", 
 			   getSizeStr(filesize, filesize, 0));
 
@@ -1117,7 +843,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 	else
 	{
 		if (!appliedcomp)
-			printf("File is HFS+/APFS compressed.\n");
+			printf("File is compressed.\n");
 		switch (compressionType) {
 			case CMP_ZLIB_XATTR:
 			case CMP_ZLIB_RESOURCE_FORK:
@@ -1145,12 +871,6 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		filesize = fileinfo->st_size;
 		printf("File size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
 			   getSizeStr(filesize, filesize, 1));
-		if (legacy_output) {
-			filesize = RFsize;
-			filesize_rounded = roundToBlkSize(filesize, fileinfo);
-			printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
-				   getSizeStr(filesize, filesize_rounded, 1));
-		}
 		filesize = RFsize;
 		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		filesize += compattrsize;
@@ -1161,10 +881,6 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
 		filesize = roundToBlkSize(RFsize, fileinfo);
 		filesize += compattrsize + xattrssize;
-		if (!onAPFS) {
-			printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
-			filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
-		}
 		printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
 			   getSizeStr(filesize, filesize, 0));
 		if (filesize_reported) {
@@ -1207,7 +923,7 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 		filetypeinfo = getFileTypeInfo(filepath, filetype, folderinfo);
 	if (filetype_found && filetypeinfo != NULL) filetypeinfo->num_files++;
 
-	// TODO: ditto, retrieve ZFS-compressed, on-disk filesize
+	// compressed==on-disk filesize: fileinfo->st_blocks * (S_BLKSIZE)?S_BLKSIZE:512
 #ifdef __APPLE__
 	if ((fileinfo->st_flags & UF_COMPRESSED) == 0)
 #endif
@@ -1230,9 +946,6 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
 		filesize = roundToBlkSize(filesize + RFsize, fileinfo);
 		filesize += compattrsize + xattrssize;
-		if (!folderinfo->onAPFS) {
-			filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
-		}
 		folderinfo->total_size += filesize;
 		if (filetypeinfo != NULL && filetype_found)
 			filetypeinfo->total_size += filesize;
@@ -1250,12 +963,6 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				filesize = fileinfo->st_size;
 				printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
 					   getSizeStr(filesize, filesize, 1));
-				if (legacy_output) {
-					filesize = RFsize;
-					filesize_rounded = roundToBlkSize(filesize, fileinfo);
-					printf("File size (compressed data fork - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
-						   getSizeStr(filesize, filesize_rounded, 1));
-				}
 				filesize = RFsize;
 				filesize_rounded = roundToBlkSize(filesize, fileinfo);
 				filesize += compattrsize;
@@ -1266,10 +973,6 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
 				filesize = roundToBlkSize(RFsize, fileinfo);
 				filesize += compattrsize + xattrssize;
-				if (!folderinfo->onAPFS) {
-					printf("Approximate overhead of extended attributes: %ld bytes\n", ((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey));
-					filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
-				}
 				printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
 					   getSizeStr(filesize, filesize, 0));
 			}
@@ -1301,9 +1004,6 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 		}
 		filesize = roundToBlkSize(RFsize, fileinfo);
 		filesize += compattrsize + xattrssize;
-		if (!folderinfo->onAPFS) {
-			filesize += (((ssize_t) numxattrs) * sizeof(HFSPlusAttrKey)) + sizeof(HFSPlusCatalogFile);
-		}
 		folderinfo->total_size += filesize;
 		folderinfo->num_compressed++;
 		if (filetypeinfo != NULL && filetype_found)
@@ -1337,13 +1037,7 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 			   getSizeStr(foldersize, foldersize_rounded, 0));
 	foldersize = folderinfo->compressed_size;
 	foldersize_rounded = folderinfo->compressed_size_rounded;
-	if (legacy_output
-			&& ((folderinfo->num_hard_link_files == 0 && folderinfo->num_hard_link_folders == 0) || !hardLinkCheck)) {
-		printf("Folder size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
-			   getSizeStr(foldersize, foldersize_rounded, 1));
-	} else {
-		printf("Folder size (compressed - decmpfs xattr): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
-	}
+	printf("Folder size (compressed - decmpfs xattr): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
 	foldersize = folderinfo->compressed_size + folderinfo->compattr_size;
 	foldersize_rounded = folderinfo->compressed_size_rounded + folderinfo->compattr_size;
 	printf("Folder size (compressed): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
@@ -1407,7 +1101,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 						{
 							if (PP)
 							{
-								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp, &folderinfo->onAPFS)) {
+								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp)) {
 									addFileToParallelProcessor( PP, currfile->fts_path, currfile->fts_statp, folderinfo, false );
 								} else {
 									process_file(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
@@ -1424,17 +1118,11 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 					folderinfo->num_hard_link_files++;
 					
 					folderinfo->num_files++;
-					if (!folderinfo->onAPFS) {
-						folderinfo->total_size += sizeof(HFSPlusCatalogFile);
-					}
 					if (filetype_found && (filetypeinfo = getFileTypeInfo(currfile->fts_path, filetype, folderinfo)) != NULL)
 					{
 						filetypeinfo->num_hard_link_files++;
 						
 						filetypeinfo->num_files++;
-						if (!folderinfo->onAPFS) {
-							filetypeinfo->total_size += sizeof(HFSPlusCatalogFile);
-						}
 					}
 				}
 				if (filetype != NULL) free(filetype);
@@ -1848,7 +1536,7 @@ next_arg:;
 			fi.backup_file = backupFile;
 			if (PP)
 			{
-				if (fileIsCompressable(fullpath, &fileinfo, &fi.onAPFS))
+				if (fileIsCompressable(fullpath, &fileinfo))
 				{
 					addFileToParallelProcessor( PP, fullpath, &fileinfo, &fi, true );
 				}
@@ -1866,9 +1554,8 @@ next_arg:;
 
 		if (argIsFile && printVerbose > 0)
 		{
-			bool onAPFS;
-			fileIsCompressable(fullpath, &fileinfo, &onAPFS);
-			printFileInfo(fullpath, &fileinfo, applycomp, onAPFS);
+			fileIsCompressable(fullpath, &fileinfo);
+			printFileInfo(fullpath, &fileinfo, applycomp);
 		}
 		else if (!argIsFile)
 		{
@@ -1958,7 +1645,7 @@ next_arg:;
 								printf("\n");
 						}
 						if (!folderinfo.invert_filetypelist)
-							printf("Number of HFS+/APFS compressed files: %lld\n", folderinfo.filetypes[i].num_compressed);
+							printf("Number of compressed files: %lld\n", folderinfo.filetypes[i].num_compressed);
 						if (printVerbose > 0 && nJobs == 0 && (!folderinfo.invert_filetypelist))
 						{
 							printf("Total number of files: %lld\n", folderinfo.filetypes[i].num_files);
@@ -1973,14 +1660,8 @@ next_arg:;
 								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							filesize = folderinfo.filetypes[i].compressed_size;
 							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded;
-							if (legacy_output
-									&& (folderinfo.filetypes[i].num_hard_link_files == 0 || !hardLinkCheck)) {
-								printf("File(s) size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
-									   getSizeStr(filesize, filesize_rounded, 1));
-							} else {
-								printf("File(s) size (compressed - decmpfs xattr): %s\n",
-									   getSizeStr(filesize, filesize_rounded, 0));
-							}
+							printf("File(s) size (compressed - decmpfs xattr): %s\n",
+								   getSizeStr(filesize, filesize_rounded, 0));
 							filesize = folderinfo.filetypes[i].compressed_size + folderinfo.filetypes[i].compattr_size;
 							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded + folderinfo.filetypes[i].compattr_size;
 							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
@@ -2006,7 +1687,7 @@ next_arg:;
 					if (folderinfo.numfiletypes > 1 || folderinfo.invert_filetypelist)
 					{
 						printf("\nTotals of file content types\n");
-						printf("Number of HFS+/APFS compressed files: %lld\n", alltypesinfo.num_compressed);
+						printf("Number of compressed files: %lld\n", alltypesinfo.num_compressed);
 						if (printVerbose > 0 && nJobs == 0)
 						{
 							printf("Total number of files: %lld\n", alltypesinfo.num_files);
@@ -2021,14 +1702,8 @@ next_arg:;
 								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							filesize = alltypesinfo.compressed_size;
 							filesize_rounded = alltypesinfo.compressed_size_rounded;
-							if (legacy_output
-									 && (alltypesinfo.num_hard_link_files == 0 || !hardLinkCheck)) {
-								printf("File(s) size (compressed - decmpfs xattr; reported size by Mac OS 10.0-10.5 Finder): %s\n",
-									   getSizeStr(filesize, filesize_rounded, 1));
-							} else {
-								printf("File(s) size (compressed - decmpfs xattr): %s\n",
-									   getSizeStr(filesize, filesize_rounded, 0));
-							}
+							printf("File(s) size (compressed - decmpfs xattr): %s\n",
+								   getSizeStr(filesize, filesize_rounded, 0));
 							filesize = alltypesinfo.compressed_size + alltypesinfo.compattr_size;
 							filesize_rounded = alltypesinfo.compressed_size_rounded + alltypesinfo.compattr_size;
 							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
@@ -2047,7 +1722,7 @@ next_arg:;
 					else if (folderinfo.num_compressed == 0 && applycomp)
 						printf("No compressable files in folder\n");
 					else
-						printf("Number of HFS+/APFS compressed files: %lld\n", folderinfo.num_compressed);
+						printf("Number of compressed files: %lld\n", folderinfo.num_compressed);
 					if (printVerbose > 0)
 					{
 						printFolderInfo( &folderinfo, hardLinkCheck );

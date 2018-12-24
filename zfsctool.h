@@ -20,24 +20,23 @@
 #include <fts.h>
 #include <sys/xattr.h>
 #ifndef __APPLE__
-    #define false 0
-    #define FALSE 0
-    #define true !false
-	#define TRUE !FALSE
+#define false 0
+#define FALSE 0
+#define true !false
+#define TRUE !FALSE
 #   ifndef __cplusplus
-        typedef unsigned char bool;
+typedef unsigned char bool;
 #   endif
-    typedef u_int16_t UInt16;
-    typedef u_int32_t UInt32;
-    typedef u_int64_t UInt64;
+typedef u_int16_t UInt16;
+typedef u_int32_t UInt32;
+typedef u_int64_t UInt64;
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif //__cplusplus
 
-struct folder_info
-{
+struct folder_info {
 	long long int uncompressed_size;
 	long long int uncompressed_size_rounded;
 	long long int compressed_size;
@@ -50,10 +49,10 @@ struct folder_info
 	long long int num_folders;
 	long long int num_hard_link_folders;
 	long long int maxSize;
-    // set by compressFile():
+	// set by compressFile():
 	long long int data_compressed_size;
 	int print_info;
-    compression_type compressiontype;
+	compression_type compressiontype;
 	int compressionlevel;
 	double minSavings;
 	bool print_files;
@@ -73,7 +72,7 @@ struct folder_info
 public:
 	folder_info()
 	{
-		memset( this, 0, sizeof(struct folder_info) );
+		memset(this, 0, sizeof(struct folder_info));
 	}
 	folder_info(const struct folder_info *src)
 	{
@@ -86,7 +85,7 @@ public:
 private:
 	void init(const struct folder_info *src)
 	{
-		memcpy( this, src, sizeof(struct folder_info) );
+		memcpy(this, src, sizeof(struct folder_info));
 		// we don't duplicate the filetypeslist!
 		filetypeslist = NULL;
 		filetypeslistlen = filetypeslistsize = 0;
@@ -94,8 +93,7 @@ private:
 #endif
 };
 
-struct filetype_info
-{
+struct filetype_info {
 	char *filetype;
 	char **extensions;
 	int extensionssize;
@@ -113,7 +111,7 @@ struct filetype_info
 
 #ifdef SUPPORT_PARALLEL
 #	ifdef __cplusplus
-extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker=NULL);
+extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker = NULL);
 #	else
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker);
 #	endif
@@ -121,7 +119,7 @@ extern void compressFile(const char *inFile, struct stat *inFileInfo, struct fol
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *ignored);
 #endif
 extern long long process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo);
-extern int zfsctool (int argc, const char * argv[]);
+extern int zfsctool(int argc, const char *argv[]);
 
 #ifdef __cplusplus
 }

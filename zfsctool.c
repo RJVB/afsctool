@@ -809,18 +809,13 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		filesize = fileinfo->st_size;
 		printf("File size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
 			   getSizeStr(filesize, filesize, 1));
-		filesize = RFsize;
+		// report the actual file-on-disk size
+		filesize = fileinfo->st_blocks * S_BLKSIZE;
 		filesize_rounded = roundToBlkSize(filesize, fileinfo);
-		filesize += compattrsize;
-		filesize_rounded += compattrsize;
 		printf("File size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
-		printf("Compression savings: %0.1f%%\n", (1.0 - (((double) RFsize + compattrsize) / fileinfo->st_size)) * 100.0);
+		printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
 		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
-		filesize = roundToBlkSize(RFsize, fileinfo);
-		filesize += compattrsize + xattrssize;
-		printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
-			   getSizeStr(filesize, filesize, 0));
 		if (filesize_reported) {
 			printf("Uncompressed file size reported in compressed header: %lld bytes\n", filesize_reported);
 		}
@@ -900,13 +895,11 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 				filesize += compattrsize;
 				filesize_rounded += compattrsize;
 				printf("File size (compressed data fork): %s\n", getSizeStr(filesize, filesize_rounded, 0));
-				printf("Compression savings: %0.1f%%\n", (1.0 - (((double) RFsize + compattrsize) / fileinfo->st_size)) * 100.0);
+				// on-disk file size:
+				filesize = fileinfo->st_blocks * S_BLKSIZE;
+				printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
 				printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
 				printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
-				filesize = roundToBlkSize(RFsize, fileinfo);
-				filesize += compattrsize + xattrssize;
-				printf("Approximate total file size (compressed data fork + EA + EA overhead + file overhead): %s\n",
-					   getSizeStr(filesize, filesize, 0));
 			} else if (!folderinfo->compress_files) {
 				printf("%s\n", filepath);
 			}
@@ -920,7 +913,7 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 			filetypeinfo->uncompressed_size += filesize;
 			filetypeinfo->uncompressed_size_rounded += filesize_rounded;
 		}
-		ret = filesize = RFsize;
+		ret = filesize = fileinfo->st_blocks * S_BLKSIZE;
 		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		folderinfo->compressed_size += filesize;
 		folderinfo->compressed_size_rounded += filesize_rounded;
@@ -930,8 +923,6 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 			filetypeinfo->compressed_size_rounded += filesize_rounded;
 			filetypeinfo->compattr_size += compattrsize;
 		}
-		filesize = roundToBlkSize(RFsize, fileinfo);
-		filesize += compattrsize + xattrssize;
 		folderinfo->total_size += filesize;
 		folderinfo->num_compressed++;
 		if (filetypeinfo != NULL && filetype_found) {
@@ -964,11 +955,8 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 			   getSizeStr(foldersize, foldersize_rounded, 0));
 	foldersize = folderinfo->compressed_size;
 	foldersize_rounded = folderinfo->compressed_size_rounded;
-	printf("Folder size (compressed - decmpfs xattr): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
-	foldersize = folderinfo->compressed_size + folderinfo->compattr_size;
-	foldersize_rounded = folderinfo->compressed_size_rounded + folderinfo->compattr_size;
 	printf("Folder size (compressed): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
-	printf("Compression savings: %0.1f%%\n", (1.0 - ((float)(folderinfo->compressed_size + folderinfo->compattr_size) / folderinfo->uncompressed_size)) * 100.0);
+	printf("Compression savings: %0.1f%%\n", (1.0 - ((float)(folderinfo->compressed_size) / folderinfo->uncompressed_size)) * 100.0);
 	foldersize = folderinfo->total_size;
 	printf("Approximate total folder size (files + file overhead + folder overhead): %s\n",
 		   getSizeStr(foldersize, foldersize, 0));

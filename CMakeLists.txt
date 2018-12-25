@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
 project(afsctool VERSION 1.6.9)
 set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
 
@@ -16,6 +16,8 @@ include(FeatureSummary)
 include(CheckIncludeFile)
 
 include(GetGitRevisionDescription)
+
+set(CMAKE_CXX_STANDARD 11)
 
 find_package(ZLIBP 1.2.8 REQUIRED)
 find_package(SPARSEHASH)
@@ -85,6 +87,17 @@ if(APPLE)
     target_link_libraries(afsctool "-framework CoreServices")
 else()
     target_link_libraries(afsctool "-lrt -ldl -lbsd -pthread")
+endif()
+
+add_executable(zfsctool
+    zfsctool.cpp
+    $<TARGET_OBJECTS:PP>
+)
+target_link_libraries(zfsctool ${PKG_SPARSEHASH_LIBRARIES})
+if(APPLE)
+    target_link_libraries(zfsctool "-framework CoreServices")
+else()
+    target_link_libraries(zfsctool "-lrt -ldl -lbsd -pthread")
 endif()
 
 install(TARGETS afsctool DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)

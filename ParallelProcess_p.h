@@ -20,6 +20,10 @@
 
 #define CRITSECTLOCK	MutexEx
 
+#ifdef __MACH__
+#include <mach/thread_info.h>
+#endif
+
 template <typename T>
 class ParallelProcessor
 {
@@ -146,14 +150,14 @@ public:
 class iZFSDataSetCompressionInfo : public std::string
 {
 public:
-	iZFSDataSetCompressionInfo(std::string &name, std::string&)
+	iZFSDataSetCompressionInfo(const char *name, const char*)
 		: std::string(name)
 	{}
 	virtual ~iZFSDataSetCompressionInfo()
 	{}
 };
 
-typedef google::dense_hash_map<std::string,iZFSDataSetCompressionInfo*> iZFSDataSetCompressionInfoForFile;
+typedef google::dense_hash_map<std::string,iZFSDataSetCompressionInfo*> iZFSDataSetCompressionInfoForName;
 
 class ParallelFileProcessor : public ParallelProcessor<FileEntry>
 {
@@ -178,7 +182,18 @@ public:
 		return verboseLevel;
 	}
 
-	iZFSDataSetCompressionInfo *z_dataSet(std::string &name);
+	// lookup the ZFS dataset info for file <name>.
+	iZFSDataSetCompressionInfo *z_dataSetForFile(const std::string &fileName);
+	// lookup the ZFS dataset info for file <name>
+	iZFSDataSetCompressionInfo *z_dataSetForFile(const char *fileName);
+	// lookup the ZFS dataset info for dataset <name>.
+	iZFSDataSetCompressionInfo *z_dataSet(const std::string &name);
+	// lookup the ZFS dataset info for dataset <name>
+	iZFSDataSetCompressionInfo *z_dataSet(const char *name);
+	// register a ZFS dataset info instance for file <name>
+	// any old registration is deleted first; ownership to <info> is
+	// transferred to the dataset registry.
+	void z_addDataSet(const std::string &fileName, iZFSDataSetCompressionInfo *info);
 
 	FolderInfo jobInfo;
 protected:
@@ -200,7 +215,10 @@ protected:
 	DWORD ioLockingThread;
 	int verboseLevel;
 
-	iZFSDataSetCompressionInfoForFile z_dataSetInfo;
+	// a dataset name -> info map
+	iZFSDataSetCompressionInfoForName z_dataSetInfo;
+	// a filename -> dataset info map
+	iZFSDataSetCompressionInfoForName z_dataSetInfoForFile;
 friend class FileProcessor;
 friend struct FileEntry;
 };

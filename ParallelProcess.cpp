@@ -118,9 +118,11 @@ ParallelFileProcessor::ParallelFileProcessor(int n, int r, int verbose)
 	verboseLevel = verbose;
 	memset( &jobInfo, 0, sizeof(jobInfo) );
 	z_dataSetInfo.set_empty_key(std::string());
+	z_dataSetInfoForFile.set_empty_key(std::string());
 	// there appears to be no reason to invoke set_deleted_key();
 	// let's make sure:
 	z_dataSetInfo.clear();
+	z_dataSetInfoForFile.clear();
 }
 
 ParallelFileProcessor::~ParallelFileProcessor()
@@ -133,6 +135,8 @@ ParallelFileProcessor::~ParallelFileProcessor()
 	if( allDoneEvent ){
 		CloseHandle(allDoneEvent);
 	}
+	// the file->info map holds copies; just empty it.
+	z_dataSetInfoForFile.clear();
 	// delete any remaining values from the z_dataSetInfo map
 	for (auto elem : z_dataSetInfo) {
 		delete elem.second;
@@ -301,9 +305,37 @@ int ParallelFileProcessor::workerDone(FileProcessor *worker)
 	return nJobs;
 }
 
-iZFSDataSetCompressionInfo *ParallelFileProcessor::z_dataSet(std::string &name)
+iZFSDataSetCompressionInfo *ParallelFileProcessor::z_dataSetForFile(const std::string &fileName)
 {
-	return nullptr;
+	return z_dataSetInfoForFile.count(fileName) ? z_dataSetInfoForFile[fileName] : nullptr;
+}
+
+iZFSDataSetCompressionInfo *ParallelFileProcessor::z_dataSetForFile(const char *fileName)
+{
+	const std::string n = fileName;
+	return z_dataSetForFile(n);
+}
+
+iZFSDataSetCompressionInfo *ParallelFileProcessor::z_dataSet(const std::string &name)
+{
+	return z_dataSetInfo.count(name) ? z_dataSetInfo[name] : nullptr;
+}
+
+iZFSDataSetCompressionInfo *ParallelFileProcessor::z_dataSet(const char *name)
+{
+	const std::string n = name;
+	return z_dataSet(n);
+}
+
+void ParallelFileProcessor::z_addDataSet(const std::string &fileName, iZFSDataSetCompressionInfo *info)
+{
+	// iZFSDataSetCompressionInfo inherits std::string so we can do this:
+	auto old = z_dataSet(*info);
+	if (old && old != info) {
+		delete old;
+	}
+	z_dataSetInfo[*info] = info;
+	z_dataSetInfoForFile[fileName] = info;
 }
 
 // ================================= FileProcessor methods =================================
@@ -370,7 +402,7 @@ void FileProcessor::InitThread()
 	hasInfo = false;
 }
 
-inline bool FileProcessor::lockScope()
+bool FileProcessor::lockScope()
 {
 	if( PP ){
 		if( scope ){
@@ -385,7 +417,7 @@ inline bool FileProcessor::lockScope()
 	return false;
 }
 
-inline bool FileProcessor::unLockScope()
+bool FileProcessor::unLockScope()
 {
 	if( PP ){
 		if( scope ){

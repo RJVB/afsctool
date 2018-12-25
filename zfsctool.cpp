@@ -38,11 +38,16 @@
 #include "ParallelProcess.h"
 #include "ParallelProcess_p.h"
 
+#include <sstream>
+#include <algorithm>
+#include <iterator>
+#include <vector>
+
 static ParallelFileProcessor *PP = NULL;
 static bool exclusive_io = true;
 #include "afsctool_fullversion.h"
 
-#define xfree(x)		if((x)){free((x)); (x)=NULL;}
+#define xfree(x)		if((x)){free((void*)(x)); (x)=NULL;}
 #define xclose(x)		if((x)!=-1){close((x)); (x)=-1;}
 #define xmunmap(x,s)	if((x)){munmap((x),(s)); (x)=NULL;}
 
@@ -68,6 +73,9 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 // determine the Darwin major version number
 static int darwinMajor = 0;
 #endif
+
+int ipcPipes[2] = {-1, -1};
+char ipcPipeWriteEnd[64];
 
 char *getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 {
@@ -163,6 +171,113 @@ static void signal_handler(int sig)
 	stopParallelProcessor(PP);
 }
 
+class ZFSDataSetCompressionInfo : public iZFSDataSetCompressionInfo
+{
+public:
+	ZFSDataSetCompressionInfo(const char *name, const char *compression)
+		: iZFSDataSetCompressionInfo(name, compression)
+		, initialCompression(compression)
+		, currentCompression(compression)
+	{
+		fprintf(stderr, "dataset '%s' has compression '%s'\n",
+				name, compression);
+	}
+	ZFSDataSetCompressionInfo(std::vector<std::string>props)
+		: ZFSDataSetCompressionInfo(props[0].c_str(), props[1].c_str())
+	{}
+
+	virtual ~ZFSDataSetCompressionInfo()
+	{
+		// do something relevant here.
+		resetCompression();
+	}
+
+	bool setCompression(const std::string &newComp)
+	{
+		bool ret = false;
+		if (currentCompression != newComp) {
+			const std::string command = "zfs set compression=" + newComp + " " + *this;
+			fprintf(stderr, "%s\n", command.c_str());
+			// do something like
+			// system(command.c_str());
+			// if success:
+			currentCompression = newComp;
+			ret = true;
+		}
+		return ret;
+	}
+	bool setCompression(const char *compression)
+	{
+		const std::string newComp = compression;
+		return setCompression(newComp);
+	}
+	bool resetCompression()
+	{
+		return setCompression(initialCompression);
+	}
+
+	std::string initialCompression, currentCompression;
+	// we'll probably need something like a semaphore to keep track when the compression can be reset
+	// (= when no more workers are rewriting files on the dataset)
+};
+
+// from http://www.martinbroadhurst.com/how-to-split-a-string-in-c.html:
+template <class Container>
+void split(const std::string &str, Container &cont)
+{
+	std::istringstream iss(str);
+	std::copy(std::istream_iterator<std::string>(iss),
+		std::istream_iterator<std::string>(),
+		std::back_inserter(cont));
+}
+
+class ZFSCommandEngine : public Thread
+{
+public:
+	ZFSCommandEngine(std::string command, size_t outputLen)
+		: theCommand(command)
+		, buf(new char[outputLen])
+		, bufLen(outputLen)
+	{}
+	~ZFSCommandEngine()
+	{
+		delete[] buf;
+	}
+
+	std::string getOutput()
+	{
+		return buf;
+	}
+
+	std::string& command()
+	{
+		return theCommand;
+	}
+
+protected:
+	DWORD Run(LPVOID arg)
+	{
+		CRITSECTLOCK::Scope safe(lock);
+		std::string c = theCommand + " 1>&" + ipcPipeWriteEnd + " &";
+		int ret = system(c.c_str());
+		readlen = ret == 0? read(ipcPipes[0], buf, bufLen) : -1;
+		if (readlen > 1 && buf[readlen-1] == '\n') {
+			buf[readlen-1] = '\0';
+			readlen -= 1;
+		}
+		error = errno;
+		return ret;
+	}
+	std::string theCommand;
+	static CRITSECTLOCK lock;
+	char *buf = nullptr;
+	size_t bufLen;
+	int readlen = -1;
+public:
+	int error;
+};
+CRITSECTLOCK ZFSCommandEngine::lock(4000);
+
 bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFileProcessor *PP = nullptr)
 {
 	struct statfs fsInfo;
@@ -173,10 +288,57 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 	// this function needs to call `zfs list $inFile` to see if the file is on a ZFS dataset
 	// if the same info isn't available via fsInfo.
 	if (ret >= 0 && S_ISREG(inFileInfo->st_mode)) {
-		if (PP && PP->z_dataSet(inFile)) {
+		if (PP && PP->z_dataSetForFile(inFile)) {
 			// file already has a dataset property: OK to compress
 			retval = true;
 		} else {
+			std::string fName;
+			if (inFile[0] != '/') {
+				const char *cwd = getcwd(NULL, 0);
+				if (!cwd) {
+					fprintf(stderr, "skipping '%s' because cannot determine $PWD (%s)\n",
+							inFile, strerror(errno));
+					return false;
+				}
+				fName = std::string(cwd) + "/" + inFile;
+				xfree(cwd);
+			} else {
+				fName = inFile;
+			}
+			// obtain the dataset name by querying the 'name' property on the file. The
+			// current zfs driver command will return a name if the path begins with a
+			// valid dataset mountpoint, or else return an error;
+			std::string dataSetName;
+			auto worker = ZFSCommandEngine("zfs list -H -o name,compression " + fName, MAXPATHLEN);
+			if (worker.Start() == 0) {
+				if (int exitval = worker.Join()) {
+					fprintf(stderr, "\t`%s` returned %d (%s)\n", worker.command().c_str(), exitval, strerror(worker.error));
+				} else {
+					if (worker.getOutput().size() > 0) {
+						dataSetName = worker.getOutput();
+					} else {
+						// terse error because pclose() will probably generate an error
+						fprintf(stderr, "Skipping '%s' because cannot obtain its dataset name\n", inFile);
+					}
+				}
+			} else {
+				fprintf(stderr, "Skipping '%s' because cannot obtain its dataset name; `%s` failed to start (%s)\n",
+						inFile, worker.command().c_str(), strerror(errno));
+			}
+			if (!dataSetName.empty()) {
+				// dataSetName will now contain something like "name\tcompression";
+				// split that:
+				std::vector<std::string> properties;
+				split(dataSetName, properties);
+				if (properties.size() == 2) {
+					auto knownDataSet = PP->z_dataSet(properties[0]);
+					PP->z_addDataSet(inFile, knownDataSet? knownDataSet : new ZFSDataSetCompressionInfo(properties));
+					retval = true;
+				} else {
+					fprintf(stderr, "Skipping '%s' because '%s' parses to %lu items\n",
+							inFile, dataSetName.c_str(), properties.size());
+				}
+			}
 		}
 	}
 	return retval;
@@ -254,6 +416,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		return;
 	}
 	orig_mode = inFileInfo->st_mode;
+#ifdef WE_ARE_FUNCTIONAL
 	if ((orig_mode & S_IWUSR) == 0) {
 		chmod(inFile, orig_mode | S_IWUSR);
 		lstat(inFile, inFileInfo);
@@ -262,18 +425,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		chmod(inFile, orig_mode | S_IRUSR);
 		lstat(inFile, inFileInfo);
 	}
+#endif
 
 #if !defined(NO_USE_MMAP)
 	useMmap = true;
 #endif
 
 	bool locked = false;
-	if (exclusive_io && worker) {
-		// Lock the IO lock. We'll unlock it when we're done, but we don't bother
-		// when we have to return before that as our caller (a worker thread)
-		// will clean up for us.
-		locked = worker->lockScope();
-	}
 	// use open() with an exclusive lock so noone can modify the file while we're at it
 	int fdIn = open(inFile, O_RDWR | O_EXLOCK);
 	if (fdIn == -1) {
@@ -315,7 +473,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 	}
 	// keep our filedescriptor open to maintain the lock!
-#ifdef __APPLE__
 	if (backupFile) {
 		int fd, bkNameLen;
 		FILE *fp;
@@ -353,17 +510,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		utimes(backupName, times);
 		chmod(backupName, orig_mode);
 	}
-#endif
 
-	// FIXME
 	if (exclusive_io && worker) {
-		locked = worker->unLockScope();
-	}
-	// 20160928: the actual rewrite of the file is never done in parallel
-	if (worker) {
 		locked = worker->lockScope();
 	}
 
+#ifdef WE_ARE_FUNCTIONAL
 	// fdIn is still open
 	ftruncate(fdIn, 0);
 	lseek(fdIn, SEEK_SET, 0);
@@ -377,6 +529,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		xclose(fdIn)
 		goto bail;
 	}
+#endif
+
 // 	fsync(fdIn);
 	xclose(fdIn);
 	if (checkFiles) {
@@ -462,11 +616,13 @@ fail:
 // 	}
 // #endif
 bail:
+#ifdef WE_ARE_FUNCTIONAL
 	utimes(inFile, times);
 	if (inFileInfo->st_mode != orig_mode) {
 		chmod(inFile, orig_mode);
 	}
-	if (worker) {
+#endif
+	if (worker && locked) {
 		locked = worker->unLockScope();
 	}
 	xclose(fdIn);
@@ -899,7 +1055,7 @@ int zfsctool(int argc, const char *argv[])
 
 	if (argc < 2) {
 		printUsage();
-		exit(EINVAL);
+		return(EINVAL);
 	}
 
 #if !__has_builtin(__builtin_available)
@@ -912,14 +1068,14 @@ int zfsctool(int argc, const char *argv[])
 				case 'l':
 					if (createfile || extractfile || decomp) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					printDir = TRUE;
 					break;
 				case 'L':
 					if (createfile || extractfile || decomp) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					allowLargeBlocks = TRUE;
 					break;
@@ -929,28 +1085,28 @@ int zfsctool(int argc, const char *argv[])
 				case 'd':
 					if (printDir || applycomp || hardLinkCheck) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					decomp = TRUE;
 					break;
 				case 'a':
 					if (printDir || extractfile || applycomp || hardLinkCheck) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					createfile = TRUE;
 					break;
 				case 'x':
 					if (printDir || createfile || applycomp || hardLinkCheck) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					extractfile = TRUE;
 					break;
 				case 'c':
 					if (createfile || extractfile || decomp) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					applycomp = TRUE;
 					break;
@@ -960,14 +1116,14 @@ int zfsctool(int argc, const char *argv[])
 				case 'n':
 					if (createfile || extractfile || decomp) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					fileCheck = FALSE;
 					break;
 				case 'f':
 					if (createfile || extractfile || decomp) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					hardLinkCheck = TRUE;
 					break;
@@ -982,14 +1138,14 @@ int zfsctool(int argc, const char *argv[])
 				case '9':
 					if (createfile || extractfile || decomp) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					compressionlevel = argv[i][j] - '0';
 					break;
 				case 'm':
 					if (createfile || extractfile || decomp || j + 1 < strlen(argv[i]) || i + 2 > argc) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					i++;
 					sscanf(argv[i], "%lld", &maxSize);
@@ -998,33 +1154,33 @@ int zfsctool(int argc, const char *argv[])
 				case 's':
 					if (createfile || extractfile || decomp || j + 1 < strlen(argv[i]) || i + 2 > argc) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					i++;
 					sscanf(argv[i], "%lf", &minSavings);
 					if (minSavings > 99 || minSavings < 0) {
 						fprintf(stderr, "Invalid minimum savings percentage; must be a number from 0 to 99\n");
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					j = strlen(argv[i]) - 1;
 					break;
 				case 'T':
 					if (j + 1 < strlen(argv[i]) || i + 2 > argc) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					i++;
 					{
 						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					j = strlen(argv[i]) - 1;
 					break;
 				case 'b':
 					if (!applycomp) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					folderinfo.backup_file = backupFile = TRUE;
 					break;
@@ -1033,7 +1189,7 @@ int zfsctool(int argc, const char *argv[])
 				case 'R':
 					if (!applycomp) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					if (argv[i][j] == 'J') {
 						exclusive_io = false;
@@ -1056,14 +1212,14 @@ int zfsctool(int argc, const char *argv[])
 				case 'S':
 					if (!applycomp) {
 						printUsage();
-						exit(EINVAL);
+						return(EINVAL);
 					}
 					sortQueue = true;
 					goto next_arg;
 					break;
 				default:
 					printUsage();
-					exit(EINVAL);
+					return(EINVAL);
 					break;
 			}
 		}
@@ -1073,8 +1229,14 @@ next_arg:
 
 	if (i == argc || ((createfile || extractfile) && (argc - i < 2))) {
 		printUsage();
-		exit(EINVAL);
+		return(EINVAL);
 	}
+
+	if (int ret = pipe(ipcPipes)) {
+		fprintf(stderr, "Error creating IPC pipe (%s)\n", strerror(errno));
+		return errno;
+	}
+	snprintf(ipcPipeWriteEnd, sizeof(ipcPipeWriteEnd)/sizeof(char), "%d", ipcPipes[1]);
 
 	if (nJobs > 0) {
 		if (nReverse && !sortQueue) {
@@ -1113,7 +1275,7 @@ next_arg:
 				cwd = getcwd(NULL, 0);
 				if (cwd == NULL) {
 					fprintf(stderr, "Unable to get PWD, exiting...\n");
-					exit(EACCES);
+					return(EACCES);
 				}
 				free_dst = TRUE;
 				fullpathdst = (char *) malloc(strlen(cwd) + strlen(argv[i + 1]) + 2);
@@ -1127,7 +1289,7 @@ next_arg:
 			cwd = getcwd(NULL, 0);
 			if (cwd == NULL) {
 				fprintf(stderr, "Unable to get PWD, exiting...\n");
-				exit(EACCES);
+				return(EACCES);
 			}
 			free_src = TRUE;
 			fullpath = (char *) malloc(strlen(cwd) + strlen(argv[i]) + 2);
@@ -1371,5 +1533,17 @@ next_arg:
 // 	if (maxOutBufSize) {
 // 		fprintf(stderr, "maxOutBufSize: %zd\n", maxOutBufSize);
 // 	}
+	if (ipcPipes[0] != -1) {
+		close(ipcPipes[0]);
+	}
+	if (ipcPipes[1] != -1) {
+		close(ipcPipes[1]);
+	}
+
 	return 0;
+}
+
+int main (int argc, const char * argv[])
+{
+    return zfsctool(argc, argv);
 }

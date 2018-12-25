@@ -613,6 +613,7 @@ bool checkForHardLink(const char *filepath, const struct stat *fileInfo, const s
 	return FALSE;
 }
 
+#if 0
 void add_extension_to_filetypeinfo(const char *filepath, struct filetype_info *filetypeinfo)
 {
 	long int right_pos, left_pos = 0, curr_pos = 1, i, fileextensionlen;
@@ -730,10 +731,11 @@ struct filetype_info *getFileTypeInfo(const char *filepath, const char *filetype
 	folderinfo->numfiletypes++;
 	return &folderinfo->filetypes[left_pos];
 }
+#endif //0
 
 void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp)
 {
-	char *xattrnames, *curr_attr, *filetype;
+	char *xattrnames, *curr_attr;
 	ssize_t xattrnamesize, xattrssize = 0, xattrsize, RFsize = 0, compattrsize = 0;
 	long long int filesize, filesize_rounded, filesize_reported = 0;
 	int numxattrs = 0, numhiddenattr = 0;
@@ -822,37 +824,19 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 	}
 }
 
-long long process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo)
+long long process_file(const char *filepath, const char* /*filetype*/, struct stat *fileinfo, struct folder_info *folderinfo)
 {
 	char *xattrnames, *curr_attr;
 	const char *fileextension = NULL;
 	ssize_t xattrnamesize, xattrssize = 0, xattrsize, RFsize = 0, compattrsize = 0;
 	long long int filesize, filesize_rounded, ret;
 	int numxattrs = 0, numhiddenattr = 0, i;
-	struct filetype_info *filetypeinfo = NULL;
-	bool filetype_found = FALSE;
 
 	if (quitRequested) {
 		return 0;
 	}
 
 	folderinfo->num_files++;
-
-	if (folderinfo->filetypeslist != NULL && filetype != NULL) {
-		for (i = strlen(filepath) - 1; i > 0; i--)
-			if (filepath[i] == '.' || filepath[i] == '/')
-				break;
-		if (i != 0 && i != strlen(filepath) - 1 && filepath[i] != '/' && filepath[i - 1] != '/')
-			fileextension = &filepath[i + 1];
-		for (i = 0; i < folderinfo->filetypeslistlen; i++)
-			if (strcmp(folderinfo->filetypeslist[i], filetype) == 0 ||
-					strcmp("ALL", folderinfo->filetypeslist[i]) == 0 ||
-					(fileextension != NULL && strcasecmp(fileextension, folderinfo->filetypeslist[i]) == 0))
-				filetype_found = TRUE;
-	}
-	if (folderinfo->filetypeslist != NULL && filetype_found)
-		filetypeinfo = getFileTypeInfo(filepath, filetype, folderinfo);
-	if (filetype_found && filetypeinfo != NULL) filetypeinfo->num_files++;
 
 	// compressed==on-disk filesize: fileinfo->st_blocks * (S_BLKSIZE)?S_BLKSIZE:512
 #ifdef __APPLE__
@@ -867,26 +851,16 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 		folderinfo->uncompressed_size_rounded += filesize_rounded;
 		folderinfo->compressed_size += filesize;
 		folderinfo->compressed_size_rounded += filesize_rounded;
-		if (filetypeinfo != NULL && filetype_found) {
-			filetypeinfo->uncompressed_size += filesize;
-			filetypeinfo->uncompressed_size_rounded += filesize_rounded;
-			filetypeinfo->compressed_size += filesize;
-			filetypeinfo->compressed_size_rounded += filesize_rounded;
-		}
 		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
 		filesize = roundToBlkSize(filesize + RFsize, fileinfo);
 		filesize += compattrsize + xattrssize;
 		folderinfo->total_size += filesize;
-		if (filetypeinfo != NULL && filetype_found)
-			filetypeinfo->total_size += filesize;
 	}
 #ifdef __APPLE__
 	else {
 		if (folderinfo->print_files) {
 			if (folderinfo->print_info > 1) {
 				printf("%s:\n", filepath);
-				if (filetype != NULL)
-					printf("File content type: %s\n", filetype);
 				filesize = fileinfo->st_size;
 				printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
 					   getSizeStr(filesize, filesize, 1));
@@ -909,26 +883,13 @@ long long process_file(const char *filepath, const char *filetype, struct stat *
 		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		folderinfo->uncompressed_size += filesize;
 		folderinfo->uncompressed_size_rounded += filesize_rounded;
-		if (filetypeinfo != NULL && filetype_found) {
-			filetypeinfo->uncompressed_size += filesize;
-			filetypeinfo->uncompressed_size_rounded += filesize_rounded;
-		}
 		ret = filesize = fileinfo->st_blocks * S_BLKSIZE;
 		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		folderinfo->compressed_size += filesize;
 		folderinfo->compressed_size_rounded += filesize_rounded;
 		folderinfo->compattr_size += compattrsize;
-		if (filetypeinfo != NULL && filetype_found) {
-			filetypeinfo->compressed_size += filesize;
-			filetypeinfo->compressed_size_rounded += filesize_rounded;
-			filetypeinfo->compattr_size += compattrsize;
-		}
 		folderinfo->total_size += filesize;
 		folderinfo->num_compressed++;
-		if (filetypeinfo != NULL && filetype_found) {
-			filetypeinfo->total_size += filesize;
-			filetypeinfo->num_compressed++;
-		}
 	}
 #endif
 	return ret;
@@ -965,11 +926,10 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 {
 	FTSENT *currfile;
-	char *xattrnames, *curr_attr, *filetype = NULL, *fileextension;
+	char *xattrnames, *curr_attr, **fileextension;
 	ssize_t xattrnamesize, xattrssize, xattrsize;
 	int numxattrs, i;
-	bool volume_search, filetype_found;
-	struct filetype_info *filetypeinfo = NULL;
+	bool volume_search;
 
 	currfile = fts_read(currfolder);
 	if (currfile == NULL) {
@@ -997,33 +957,24 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 					}
 				}
 			} else if (S_ISREG(currfile->fts_statp->st_mode) || S_ISLNK(currfile->fts_statp->st_mode)) {
-				filetype_found = FALSE;
 				if (!folderinfo->check_hard_links || !checkForHardLink(currfile->fts_path, currfile->fts_statp, folderinfo)) {
 					if (folderinfo->compress_files && S_ISREG(currfile->fts_statp->st_mode)) {
-						if (folderinfo->filetypeslist == NULL || filetype_found) {
-							if (PP) {
-								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp)) {
-									addFileToParallelProcessor(PP, currfile->fts_path, currfile->fts_statp, folderinfo, false);
-								} else {
-									process_file(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
-								}
+						if (PP) {
+							if (fileIsCompressable(currfile->fts_path, currfile->fts_statp)) {
+								addFileToParallelProcessor(PP, currfile->fts_path, currfile->fts_statp, folderinfo, false);
 							} else {
-								compressFile(currfile->fts_path, currfile->fts_statp, folderinfo, NULL);
+								process_file(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
 							}
+						} else {
+							compressFile(currfile->fts_path, currfile->fts_statp, folderinfo, NULL);
 						}
 					}
-					process_file(currfile->fts_path, filetype, currfile->fts_statp, folderinfo);
+					process_file(currfile->fts_path, NULL, currfile->fts_statp, folderinfo);
 				} else {
 					folderinfo->num_hard_link_files++;
 
 					folderinfo->num_files++;
-					if (filetype_found && (filetypeinfo = getFileTypeInfo(currfile->fts_path, filetype, folderinfo)) != NULL) {
-						filetypeinfo->num_hard_link_files++;
-
-						filetypeinfo->num_files++;
-					}
 				}
-				if (filetype != NULL) free(filetype);
 			}
 		} else
 			fts_set(currfolder, currfile, FTS_SKIP);
@@ -1035,24 +986,21 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 void printUsage()
 {
 	printf("zfsctool %s\n"
-		   "Apply compression to file or folder: zfsctool -c[nlfvv[v]ib] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-t <ContentType>] [-T compressor] file[s]/folder[s]\n\n"
-		   "Options:\n"
-		   "-v Increase verbosity level\n"
-		   "-f Detect hard links\n"
-		   "-l List files which fail to compress\n"
-		   "-L Allow larger-than-raw compressed chunks (not recommended; always true for LZVN compression)\n"
-		   "-n Do not verify files after compression (not recommended)\n"
-		   "-m <size> Largest file size to compress, in bytes\n"
-		   "-t <ContentType/Extension> Return statistics for files of given content type and when compressing,\n"
-		   "                           if this option is given then only files of content type(s) or extension(s) specified with this option will be compressed\n"
-		   "-i Compress or show statistics for files that don't have content type(s) or extension(s) given by -t <ContentType/Extension> instead of those that do\n"
-		   "-b make a backup of files before compressing them\n"
-		   "-jN compress (only compressable) files using <N> threads (compression is concurrent, disk IO is exclusive)\n"
-		   "-JN read, compress and write files (only compressable ones) using <N> threads (everything is concurrent except writing the compressed file)\n"
-		   "-S sort the item list by file size (leaving the largest files to the end may be beneficial if the target volume is almost full)\n"
-		   "-RM <M> of the <N> workers will work the item list (must be sorted!) in reverse order, starting with the largest files\n"
-		   "-T <compressor> Compression type to use, chosen from the supported ZFS compression types\n"
-		   , AFSCTOOL_FULL_VERSION_STRING);
+	   "Apply compression to file or folder: zfsctool -c[nlfvv[v]b] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-T compressor] file[s]/folder[s]\n\n"
+	   "Options:\n"
+	   "-v Increase verbosity level\n"
+	   "-f Detect hard links\n"
+	   "-l List files which fail to compress\n"
+	   "-L Allow larger-than-raw compressed chunks (not recommended; always true for LZVN compression)\n"
+	   "-n Do not verify files after compression (not recommended)\n"
+	   "-m <size> Largest file size to compress, in bytes\n"
+	   "-b make a backup of files before compressing them\n"
+	   "-jN compress (only compressable) files using <N> threads (compression is concurrent, disk IO is exclusive)\n"
+	   "-JN read, compress and write files (only compressable ones) using <N> threads (everything is concurrent except writing the compressed file)\n"
+	   "-S sort the item list by file size (leaving the largest files to the end may be beneficial if the target volume is almost full)\n"
+	   "-RM <M> of the <N> workers will work the item list (must be sorted!) in reverse order, starting with the largest files\n"
+	   "-T <compressor> Compression type to use, chosen from the supported ZFS compression types\n"
+	   , AFSCTOOL_FULL_VERSION_STRING);
 }
 
 int zfsctool(int argc, const char *argv[])
@@ -1060,17 +1008,16 @@ int zfsctool(int argc, const char *argv[])
 	int i, j;
 	struct stat fileinfo, dstfileinfo;
 	struct folder_info folderinfo;
-	struct filetype_info alltypesinfo;
 	FTS *currfolder;
 	FTSENT *currfile;
-	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd, *fileextension, *filetype = NULL;
+	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd, *fileextension;
 	int compressionlevel = 5;
 	compression_type compressiontype = ZLIB;
 	double minSavings = 0.0;
 	long long int filesize, filesize_rounded, maxSize = 0;
 	bool printDir = FALSE, decomp = FALSE, createfile = FALSE, extractfile = FALSE, applycomp = FALSE,
 		 fileCheck = TRUE, argIsFile, hardLinkCheck = FALSE, dstIsFile, free_src = FALSE, free_dst = FALSE,
-		 invert_filetypelist = FALSE, allowLargeBlocks = FALSE, filetype_found, backupFile = FALSE;
+		 allowLargeBlocks = FALSE, backupFile = FALSE;
 	FILE *afscFile, *outFile;
 	char *xattrnames, *curr_attr, header[4];
 	ssize_t xattrnamesize, xattrsize, getxattrret, xattrPos;
@@ -1080,10 +1027,6 @@ int zfsctool(int argc, const char *argv[])
 	UInt64 big64;
 	int nJobs = 0, nReverse = 0;
 	bool sortQueue = false;
-
-	folderinfo.filetypeslist = NULL;
-	folderinfo.filetypeslistlen = 0;
-	folderinfo.filetypeslistsize = 0;
 
 	if (argc < 2) {
 		printUsage();
@@ -1196,27 +1139,6 @@ int zfsctool(int argc, const char *argv[])
 					}
 					j = strlen(argv[i]) - 1;
 					break;
-				case 't':
-					if (j + 1 < strlen(argv[i]) || i + 2 > argc) {
-						printUsage();
-						exit(EINVAL);
-					}
-					i++;
-					if (folderinfo.filetypeslist == NULL) {
-						folderinfo.filetypeslistsize = 1;
-						folderinfo.filetypeslist = (char **) malloc(folderinfo.filetypeslistlen * sizeof(char *));
-					}
-					if (folderinfo.filetypeslistlen + 1 > folderinfo.filetypeslistsize) {
-						folderinfo.filetypeslistsize *= 2;
-						folderinfo.filetypeslist = (char **) realloc(folderinfo.filetypeslist, folderinfo.filetypeslistsize * sizeof(char *));
-					}
-					if (folderinfo.filetypeslist == NULL) {
-						fprintf(stderr, "malloc error, out of memory\n");
-						return ENOMEM;
-					}
-					folderinfo.filetypeslist[folderinfo.filetypeslistlen++] = (char *) argv[i];
-					j = strlen(argv[i]) - 1;
-					break;
 				case 'T':
 					if (j + 1 < strlen(argv[i]) || i + 2 > argc) {
 						printUsage();
@@ -1229,13 +1151,6 @@ int zfsctool(int argc, const char *argv[])
 						exit(EINVAL);
 					}
 					j = strlen(argv[i]) - 1;
-					break;
-				case 'i':
-					if (createfile || extractfile) {
-						printUsage();
-						exit(EINVAL);
-					}
-					invert_filetypelist = TRUE;
 					break;
 				case 'b':
 					if (!applycomp) {
@@ -1423,10 +1338,6 @@ next_arg:
 			folderinfo.minSavings = minSavings;
 			folderinfo.maxSize = maxSize;
 			folderinfo.check_hard_links = hardLinkCheck;
-			folderinfo.filetypes = NULL;
-			folderinfo.numfiletypes = 0;
-			folderinfo.filetypessize = 0;
-			folderinfo.invert_filetypelist = invert_filetypelist;
 			process_folder(currfolder, &folderinfo);
 			folderinfo.num_folders--;
 			if (printVerbose > 0 || !printDir) {
@@ -1436,6 +1347,7 @@ next_arg:
 				} else {
 					printf("Adding %s to queue\n", fullpath);
 				}
+#if 0
 				if (folderinfo.filetypes != NULL) {
 					alltypesinfo.filetype = NULL;
 					alltypesinfo.uncompressed_size = 0;
@@ -1540,6 +1452,7 @@ next_arg:
 					}
 					printf("\n");
 				}
+#endif //0
 				if (nJobs == 0) {
 					if (folderinfo.num_compressed == 0 && !applycomp)
 						printf("Folder contains no compressed files\n");
@@ -1563,8 +1476,6 @@ next_arg:
 			free_dst = false;
 		}
 	}
-	if (folderinfo.filetypeslist != NULL)
-		free(folderinfo.filetypeslist);
 
 	if (PP) {
 		if (sortQueue) {

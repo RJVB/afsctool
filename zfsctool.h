@@ -60,6 +60,7 @@ struct folder_info {
 	bool allowLargeBlocks;
 	bool check_files;
 	bool check_hard_links;
+#if 0
 	struct filetype_info *filetypes;
 	long long int numfiletypes;
 	long long int filetypessize;
@@ -67,6 +68,7 @@ struct folder_info {
 	int filetypeslistlen;
 	int filetypeslistsize;
 	bool invert_filetypelist;
+#endif //0
 	bool backup_file;
 #ifdef __cplusplus
 public:
@@ -86,13 +88,16 @@ private:
 	void init(const struct folder_info *src)
 	{
 		memcpy(this, src, sizeof(struct folder_info));
+#if 0
 		// we don't duplicate the filetypeslist!
 		filetypeslist = NULL;
 		filetypeslistlen = filetypeslistsize = 0;
+#endif //0
 	}
 #endif
 };
 
+#if 0
 struct filetype_info {
 	char *filetype;
 	char **extensions;
@@ -108,6 +113,7 @@ struct filetype_info {
 	long long int num_files;
 	long long int num_hard_link_files;
 };
+#endif //0
 
 #ifdef __cplusplus
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker = NULL);

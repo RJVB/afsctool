@@ -34,7 +34,7 @@
 #define MAP_NOCACHE 0
 #endif
 
-#include "afsctool.h"
+#include "zfsctool.h"
 #include "ParallelProcess.h"
 
 static ParallelFileProcessor *PP = NULL;
@@ -198,11 +198,10 @@ const char *compressionTypeName(int type)
 	return name;
 }
 
-void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker)
+void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, FileProcessor *worker)
 {
 	long long int maxSize = folderinfo->maxSize;
 	int compressionlevel = folderinfo->compressionlevel;
-	int comptype = folderinfo->compressiontype;
 	bool allowLargeBlocks = folderinfo->allowLargeBlocks;
 	double minSavings = folderinfo->minSavings;
 	bool checkFiles = folderinfo->check_files;
@@ -290,25 +289,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 #endif // APPLE
 
-	numBlocks = (filesize + compblksize - 1) / compblksize;
-	// TODO: make compression-type specific (as far as that's possible).
-	if ((filesize + 0x13A + (numBlocks * 9)) > 2147483647) {
 #if !defined(NO_USE_MMAP)
-#	if defined(ZLIB_SINGLESHOT_OUTBUF)
-		if (comptype != ZLIB)
-#	endif
-		{
-			useMmap = true;
-		}
+	useMmap = true;
 #endif
-		if (!useMmap) {
-			fprintf(stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize);
-			return;
-		}
-	} else if (filesize >= 64 * 1024 * 1024) {
-		// use a rather arbitrary threshold above which using mmap may be of interest
-		useMmap = true;
-	}
 
 	bool locked = false;
 	if (exclusive_io && worker) {

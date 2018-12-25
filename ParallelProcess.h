@@ -5,7 +5,7 @@
  */
 #ifndef _PARALLELPROCESS_H
 
-#include "afsctool.h"
+#include "fsctool.h"
 
 // =============== C++ code =============== //
 #ifndef __cplusplus

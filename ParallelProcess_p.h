@@ -8,7 +8,7 @@
 
 #ifndef _PARALLELPROCESS_P_H
 
-#include "afsctool.h"
+#include "fsctool.h"
 
 #include <deque>
 #include <string>

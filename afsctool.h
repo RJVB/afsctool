@@ -40,12 +40,11 @@
 
 #include "private/decmpfs.h"
 
+#include "fsctool.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif //__cplusplus
-
-// the various types of HFS/APFS compression. Not all are supported (on all OS versions).
-typedef enum compression_type { NONE, ZLIB, LZVN, LZFSE } compression_type;
 
 // some constants borrowed from libarchive
 /*
@@ -57,66 +56,6 @@ typedef enum compression_type { NONE, ZLIB, LZVN, LZFSE } compression_type;
 #define CMP_LZVN_RESOURCE_FORK		8	/* LZVN-compressed data is stored in the resource fork. */
 #define CMP_LZFSE_XATTR				11	/* LZVN-compressed data is stored in the xattr. */
 #define CMP_LZFSE_RESOURCE_FORK		12	/* LZVN-compressed data is stored in the resource fork. */
-
-struct folder_info
-{
-	long long int uncompressed_size;
-	long long int uncompressed_size_rounded;
-	long long int compressed_size;
-	long long int compressed_size_rounded;
-	long long int compattr_size;
-	long long int total_size;
-	long long int num_compressed;
-	long long int num_files;
-	long long int num_hard_link_files;
-	long long int num_folders;
-	long long int num_hard_link_folders;
-	long long int maxSize;
-    // set by compressFile():
-	long long int data_compressed_size;
-	int print_info;
-    compression_type compressiontype;
-	int compressionlevel;
-	double minSavings;
-	bool print_files;
-	bool compress_files;
-	bool allowLargeBlocks;
-	bool check_files;
-	bool check_hard_links;
-	struct filetype_info *filetypes;
-	long long int numfiletypes;
-	long long int filetypessize;
-	char **filetypeslist;
-	int filetypeslistlen;
-	int filetypeslistsize;
-	bool invert_filetypelist;
-	bool backup_file;
-    bool onAPFS;
-#ifdef __cplusplus
-public:
-	folder_info()
-	{
-		memset( this, 0, sizeof(struct folder_info) );
-	}
-	folder_info(const struct folder_info *src)
-	{
-		init(src);
-	}
-	folder_info(const struct folder_info &src)
-	{
-		init(&src);
-	}
-private:
-	void init(const struct folder_info *src)
-	{
-//		   fprintf( stderr, "folder_info::init(%p): copying to this=%p\n", src, this );
-		memcpy( this, src, sizeof(struct folder_info) );
-		// we don't duplicate the filetypeslist!
-		filetypeslist = NULL;
-		filetypeslistlen = filetypeslistsize = 0;
-	}
-#endif
-};
 
 struct filetype_info
 {
@@ -151,16 +90,6 @@ typedef struct __attribute__((packed)) {
 	typedef UInt32 lzvn_chunk_table;
 #endif
 
-#ifdef SUPPORT_PARALLEL
-#	ifdef __cplusplus
-extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker=NULL);
-#	else
-extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker);
-#	endif
-#else
-extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *ignored);
-#endif
-extern long long process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo);
 extern int afsctool (int argc, const char * argv[]);
 
 #ifdef __cplusplus

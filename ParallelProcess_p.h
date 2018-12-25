@@ -242,14 +242,14 @@ protected:
 	ParallelFileProcessor *PP;
 	volatile long nProcessed;
 	volatile long long runningTotalRaw, runningTotalCompressed;
-	volatile double cpuUsage;
+	volatile double cpuUsage, userTime, systemTime;
 	const bool isBackwards;
 	const int procID;
 	CRITSECTLOCK::Scope *scope;
+	bool hasInfo;
 #ifdef __MACH__
 	thread_basic_info_data_t threadInfo;
 #endif
-	bool hasInfo;
 	friend class ParallelFileProcessor;
 private:
 	FileEntry *currentEntry;

@@ -5,10 +5,13 @@
  *  This code is made available under No License At All
  */
 
-#ifdef __MACH__
+#if defined(__MACH__)
 #include <mach/mach_init.h>
 #include <mach/thread_act.h>
 #include <mach/mach_port.h>
+#elif defined(linux)
+#include <sys/time.h>
+#include <sys/resource.h>
 #endif
 
 #include <algorithm>
@@ -240,11 +243,10 @@ int ParallelFileProcessor::run()
 				}
 				if( verboseLevel > 1 ){
 					if( thread->hasInfo ){
+						fprintf( stderr, "\n\t%gs user + %gs system",
+							thread->userTime, thread->systemTime );
 #ifdef __MACH__
-						fprintf( stderr, "\n\t%gs user + %gs system; %ds slept",
-							thread->threadInfo.user_time.seconds + thread->threadInfo.user_time.microseconds * 1e-6,
-							thread->threadInfo.system_time.seconds + thread->threadInfo.system_time.microseconds * 1e-6,
-							thread->threadInfo.sleep_time );
+						fprintf( stderr, "; %ds slept", thread->threadInfo.sleep_time );
 						if( thread->threadInfo.cpu_usage ){
 							fprintf( stderr, "; %0.2lf%% CPU", thread->threadInfo.cpu_usage / 10.0 );
 						}
@@ -298,14 +300,25 @@ DWORD FileProcessor::Run(LPVOID arg)
 			runningTotalRaw += entry.fileInfo.st_size;
 			runningTotalCompressed += (entry.compressedSize > 0)? entry.compressedSize : entry.fileInfo.st_size;
 			if( PP->verbose() > 1 ){
-#ifdef __MACH__
+#if defined(__MACH__)
+                mach_port_t thread = mach_thread_self();
 				mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
 				thread_basic_info_data_t info;
-				int kr = thread_info( mach_thread_self(), THREAD_BASIC_INFO, (thread_info_t) &info, &count);
+				int kr = thread_info(thread, THREAD_BASIC_INFO, (thread_info_t) &info, &count);
 				if( kr == KERN_SUCCESS ){
+					 userTime = info.user_time.seconds + info.user_time.microseconds * 1e-6;
+					 systemTime = info.system_time.seconds + info.system_time.microseconds * 1e-6;
 					 cpuUsage += info.cpu_usage/10.0;
 					 threadInfo = info;
 					 hasInfo = true;
+				}
+				mach_port_deallocate(mach_task_self(), thread);
+#elif defined(linux)
+				struct rusage ru;
+				if (!getrusage(RUSAGE_THREAD, &ru)) {
+					userTime = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec * 1e-6;
+					systemTime = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec * 1e-6;
+					hasInfo = true;
 				}
 #endif
 			}

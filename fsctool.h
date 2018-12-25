@@ -12,6 +12,8 @@
 
 #ifndef _FSCTOOL_H
 
+#include <string.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif //__cplusplus

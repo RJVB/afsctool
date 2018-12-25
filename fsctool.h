@@ -83,7 +83,8 @@ private:
 
 #ifdef SUPPORT_PARALLEL
 #	ifdef __cplusplus
-extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker=NULL);
+class FileProcessor;
+extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, FileProcessor *worker=NULL);
 #	else
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker);
 #	endif

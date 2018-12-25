@@ -36,6 +36,7 @@
 
 #include "zfsctool.h"
 #include "ParallelProcess.h"
+#include "ParallelProcess_p.h"
 
 static ParallelFileProcessor *PP = NULL;
 static bool exclusive_io = true;
@@ -192,8 +193,10 @@ static const char *lbasename(const char *url)
 
 const char *compressionTypeName(int type)
 {
-	char *name = "";
+	char *name = (char*) "";
+#ifndef STR
 #define STR(v)		#v
+#endif
 #define STRVAL(v)	STR(v)
 	return name;
 }
@@ -201,38 +204,30 @@ const char *compressionTypeName(int type)
 void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, FileProcessor *worker)
 {
 	long long int maxSize = folderinfo->maxSize;
-	int compressionlevel = folderinfo->compressionlevel;
-	bool allowLargeBlocks = folderinfo->allowLargeBlocks;
-	double minSavings = folderinfo->minSavings;
 	bool checkFiles = folderinfo->check_files;
 	bool backupFile = folderinfo->backup_file;
 
-	// 64Kb block size (HFS compression is "64K chunked")
-	const int compblksize = 0x10000;
-	unsigned int numBlocks, outdecmpfsSize = 0;
-	void *inBuf = NULL, *outBuf = NULL, *outBufBlock = NULL, *outdecmpfsBuf = NULL, *currBlock = NULL, *blockStart = NULL;
-	long long int inBufPos;
+	void *inBuf = NULL, *outBuf = NULL;
 	const long long int filesize = inFileInfo->st_size;
-	unsigned long int cmpedsize;
-	char *xattrnames, *curr_attr;
-	ssize_t xattrnamesize, outBufSize = 0;
-	UInt32 cmpf = DECMPFS_MAGIC, orig_mode;
+	mode_t orig_mode;
 	struct timeval times[2];
 	char *backupName = NULL;
-	bool supportsLargeBlocks;
 	bool useMmap = false;
 
 	if (quitRequested) {
 		return;
 	}
 
-#ifdef __APPLE__
+#if defined(__APPLE__)
 	times[0].tv_sec = inFileInfo->st_atimespec.tv_sec;
 	times[0].tv_usec = inFileInfo->st_atimespec.tv_nsec / 1000;
 	times[1].tv_sec = inFileInfo->st_mtimespec.tv_sec;
 	times[1].tv_usec = inFileInfo->st_mtimespec.tv_nsec / 1000;
-#else
-	// is there no equivalent?
+#elif defined(linux)
+	times[0].tv_sec = inFileInfo->st_atim.tv_sec;
+	times[0].tv_usec = inFileInfo->st_atim.tv_nsec / 1000;
+	times[1].tv_sec = inFileInfo->st_mtim.tv_sec;
+	times[1].tv_usec = inFileInfo->st_mtim.tv_nsec / 1000;
 #endif
 
 	if (!fileIsCompressable(inFile, inFileInfo)) {
@@ -260,35 +255,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		lstat(inFile, inFileInfo);
 	}
 
-#ifdef __APPLE__
-	if (chflags(inFile, UF_COMPRESSED | inFileInfo->st_flags) < 0 || chflags(inFile, inFileInfo->st_flags) < 0) {
-		fprintf(stderr, "%s: chflags: %s\n", inFile, strerror(errno));
-		return;
-	}
-
-	xattrnamesize = listxattr(inFile, NULL, 0, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW);
-
-	if (xattrnamesize > 0) {
-		xattrnames = (char *) malloc(xattrnamesize);
-		if (xattrnames == NULL) {
-			fprintf(stderr, "%s: malloc error, unable to get file information (%lu bytes; %s)\n",
-					inFile, (unsigned long) xattrnamesize, strerror(errno));
-			return;
-		}
-		if ((xattrnamesize = listxattr(inFile, xattrnames, xattrnamesize, XATTR_SHOWCOMPRESSION | XATTR_NOFOLLOW)) <= 0) {
-			fprintf(stderr, "%s: listxattr: %s\n", inFile, strerror(errno));
-			free(xattrnames);
-			return;
-		}
-		for (curr_attr = xattrnames; curr_attr < xattrnames + xattrnamesize; curr_attr += strlen(curr_attr) + 1) {
-			if ((strcmp(curr_attr, XATTR_RESOURCEFORK_NAME) == 0 && strlen(curr_attr) == 22) ||
-					(strcmp(curr_attr, DECMPFS_XATTR_NAME) == 0 && strlen(curr_attr) == 17))
-				return;
-		}
-		free(xattrnames);
-	}
-#endif // APPLE
-
 #if !defined(NO_USE_MMAP)
 	useMmap = true;
 #endif
@@ -298,7 +264,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		// Lock the IO lock. We'll unlock it when we're done, but we don't bother
 		// when we have to return before that as our caller (a worker thread)
 		// will clean up for us.
-		locked = lockParallelProcessorIO(worker);
+		locked = worker->lockScope();
 	}
 	// use open() with an exclusive lock so noone can modify the file while we're at it
 	int fdIn = open(inFile, O_RDWR | O_EXLOCK);
@@ -383,11 +349,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	// FIXME
 	if (exclusive_io && worker) {
-		locked = unLockParallelProcessorIO(worker);
+		locked = worker->unLockScope();
 	}
 	// 20160928: the actual rewrite of the file is never done in parallel
 	if (worker) {
-		locked = lockParallelProcessorIO(worker);
+		locked = worker->lockScope();
 	}
 
 	// fdIn is still open
@@ -493,7 +459,7 @@ bail:
 		chmod(inFile, orig_mode);
 	}
 	if (worker) {
-		locked = unLockParallelProcessorIO(worker);
+		locked = worker->unLockScope();
 	}
 	xclose(fdIn);
 	if (backupName) {
@@ -512,8 +478,6 @@ bail:
 		xfree(inBuf);
 	}
 	xfree(outBuf);
-	xfree(outdecmpfsBuf);
-	xfree(outBufBlock);
 }
 
 bool checkForHardLink(const char *filepath, const struct stat *fileInfo, const struct folder_info *folderinfo)
@@ -719,12 +683,7 @@ struct filetype_info *getFileTypeInfo(const char *filepath, const char *filetype
 
 void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp)
 {
-	char *xattrnames, *curr_attr;
-	ssize_t xattrnamesize, xattrssize = 0, xattrsize, RFsize = 0, compattrsize = 0;
-	long long int filesize, filesize_rounded, filesize_reported = 0;
-	int numxattrs = 0, numhiddenattr = 0;
-	UInt32 compressionType = 0;
-	bool hasRF = FALSE;
+	long long int filesize, filesize_rounded;
 
 	printf("%s:\n", filepath);
 
@@ -739,82 +698,27 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 			printf("Unable to compress file.\n");
 		else
 			printf("File is not compressed.\n");
-		if (hasRF) {
-			printf("File data fork size: %lld bytes\n", fileinfo->st_size);
-			printf("File resource fork size: %ld bytes\n", RFsize);
-			if (compattrsize && printVerbose > 2)
-				printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);
-			filesize = fileinfo->st_size;
-			filesize_rounded = roundToBlkSize(filesize, fileinfo);
-			filesize += RFsize;
-			filesize_rounded = roundToBlkSize(filesize_rounded + RFsize, fileinfo);
-			printf("File size (data fork + resource fork; reported size by Mac OS X Finder): %s\n",
-				   getSizeStr(filesize, filesize_rounded, 1));
-		} else {
-			if (compattrsize && printVerbose > 2)
-				printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);
-			filesize = fileinfo->st_size;
-			filesize_rounded = roundToBlkSize(filesize, fileinfo);
-			printf("File data fork size (reported size by Mac OS X Finder): %s\n",
-				   getSizeStr(filesize, filesize_rounded, 1));
-		}
-		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
-		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
+		filesize = fileinfo->st_size;
+		filesize_rounded = roundToBlkSize(filesize, fileinfo);
+		printf("File size: %s\n", getSizeStr(filesize, filesize_rounded, 1));
 		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
-		filesize = roundToBlkSize(filesize + RFsize, fileinfo);
-		filesize += compattrsize + xattrssize;
-		printf("Approximate total file size (data fork + resource fork + EA + EA overhead + file overhead): %s\n",
-			   getSizeStr(filesize, filesize, 0));
 
 	} else {
 		if (!appliedcomp)
 			printf("File is compressed.\n");
-		switch (compressionType) {
-			case CMP_ZLIB_XATTR:
-			case CMP_ZLIB_RESOURCE_FORK:
-				printf("Compression type: %s\n", compressionTypeName(compressionType));
-				break;
-			case CMP_LZVN_XATTR:
-			case CMP_LZVN_RESOURCE_FORK:
-				printf("Compression type: %s\n", compressionTypeName(compressionType));
-				break;
-			case CMP_LZFSE_XATTR:
-			case CMP_LZFSE_RESOURCE_FORK:
-				printf("Compression type: %s\n", compressionTypeName(compressionType));
-				break;
-			default:
-				printf("Unknown compression type: %u\n", compressionType);
-				break;
-		}
-		if (printVerbose > 2) {
-			if (RFsize)
-				printf("File resource fork size: %ld bytes\n", RFsize);
-			if (compattrsize)
-				printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);
-		}
 		filesize = fileinfo->st_size;
-		printf("File size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
-			   getSizeStr(filesize, filesize, 1));
+		printf("File size (uncompressed): %s\n", getSizeStr(filesize, filesize, 1));
 		// report the actual file-on-disk size
 		filesize = fileinfo->st_blocks * S_BLKSIZE;
 		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		printf("File size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 		printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
-		printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
-		printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
-		if (filesize_reported) {
-			printf("Uncompressed file size reported in compressed header: %lld bytes\n", filesize_reported);
-		}
 	}
 }
 
 long long process_file(const char *filepath, const char* /*filetype*/, struct stat *fileinfo, struct folder_info *folderinfo)
 {
-	char *xattrnames, *curr_attr;
-	const char *fileextension = NULL;
-	ssize_t xattrnamesize, xattrssize = 0, xattrsize, RFsize = 0, compattrsize = 0;
 	long long int filesize, filesize_rounded, ret;
-	int numxattrs = 0, numhiddenattr = 0, i;
 
 	if (quitRequested) {
 		return 0;
@@ -829,15 +733,11 @@ long long process_file(const char *filepath, const char* /*filetype*/, struct st
 	{
 		ret = filesize_rounded = filesize = fileinfo->st_size;
 		filesize_rounded = roundToBlkSize(filesize_rounded, fileinfo);
-		filesize += RFsize;
-		filesize_rounded = roundToBlkSize(filesize_rounded + RFsize, fileinfo);
 		folderinfo->uncompressed_size += filesize;
 		folderinfo->uncompressed_size_rounded += filesize_rounded;
 		folderinfo->compressed_size += filesize;
 		folderinfo->compressed_size_rounded += filesize_rounded;
 		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
-		filesize = roundToBlkSize(filesize + RFsize, fileinfo);
-		filesize += compattrsize + xattrssize;
 		folderinfo->total_size += filesize;
 	}
 #ifdef __APPLE__
@@ -846,18 +746,10 @@ long long process_file(const char *filepath, const char* /*filetype*/, struct st
 			if (folderinfo->print_info > 1) {
 				printf("%s:\n", filepath);
 				filesize = fileinfo->st_size;
-				printf("File size (uncompressed data fork; reported size by Mac OS 10.6+ Finder): %s\n",
-					   getSizeStr(filesize, filesize, 1));
-				filesize = RFsize;
-				filesize_rounded = roundToBlkSize(filesize, fileinfo);
-				filesize += compattrsize;
-				filesize_rounded += compattrsize;
-				printf("File size (compressed data fork): %s\n", getSizeStr(filesize, filesize_rounded, 0));
+				printf("File size (uncompressed): %s\n", getSizeStr(filesize, filesize, 1));
 				// on-disk file size:
 				filesize = fileinfo->st_blocks * S_BLKSIZE;
 				printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
-				printf("Number of extended attributes: %d\n", numxattrs - numhiddenattr);
-				printf("Total size of extended attribute data: %ld bytes\n", xattrssize);
 			} else if (!folderinfo->compress_files) {
 				printf("%s\n", filepath);
 			}
@@ -871,7 +763,6 @@ long long process_file(const char *filepath, const char* /*filetype*/, struct st
 		filesize_rounded = roundToBlkSize(filesize, fileinfo);
 		folderinfo->compressed_size += filesize;
 		folderinfo->compressed_size_rounded += filesize_rounded;
-		folderinfo->compattr_size += compattrsize;
 		folderinfo->total_size += filesize;
 		folderinfo->num_compressed++;
 	}
@@ -910,9 +801,6 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 {
 	FTSENT *currfile;
-	char *xattrnames, *curr_attr, **fileextension;
-	ssize_t xattrnamesize, xattrssize, xattrsize;
-	int numxattrs, i;
 	bool volume_search;
 
 	currfile = fts_read(currfolder);
@@ -929,9 +817,6 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 			if (S_ISDIR(currfile->fts_statp->st_mode) && currfile->fts_ino != 2) {
 				if (currfile->fts_info & FTS_D) {
 					if (!folderinfo->check_hard_links || !checkForHardLink(currfile->fts_path, currfile->fts_statp, folderinfo)) {
-						numxattrs = 0;
-						xattrssize = 0;
-
 						folderinfo->num_folders++;
 					} else {
 						folderinfo->num_hard_link_folders++;
@@ -993,22 +878,14 @@ int zfsctool(int argc, const char *argv[])
 	struct stat fileinfo, dstfileinfo;
 	struct folder_info folderinfo;
 	FTS *currfolder;
-	FTSENT *currfile;
-	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd, *fileextension;
+	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd;
 	int compressionlevel = 5;
 	compression_type compressiontype = ZLIB;
 	double minSavings = 0.0;
-	long long int filesize, filesize_rounded, maxSize = 0;
+	long long int maxSize = 0;
 	bool printDir = FALSE, decomp = FALSE, createfile = FALSE, extractfile = FALSE, applycomp = FALSE,
 		 fileCheck = TRUE, argIsFile, hardLinkCheck = FALSE, dstIsFile, free_src = FALSE, free_dst = FALSE,
 		 allowLargeBlocks = FALSE, backupFile = FALSE;
-	FILE *afscFile, *outFile;
-	char *xattrnames, *curr_attr, header[4];
-	ssize_t xattrnamesize, xattrsize, getxattrret, xattrPos;
-	mode_t outFileMode;
-	void *attr_buf;
-	UInt16 big16;
-	UInt64 big64;
 	int nJobs = 0, nReverse = 0;
 	bool sortQueue = false;
 

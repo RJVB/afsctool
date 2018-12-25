@@ -319,7 +319,7 @@ const char *compressionTypeName(int type)
 }
 
 #ifdef SUPPORT_PARALLEL
-void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *worker )
+void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, FileProcessor *worker )
 #else
 void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *ignored)
 #endif
@@ -360,6 +360,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	times[0].tv_usec = inFileInfo->st_atimespec.tv_nsec / 1000;
 	times[1].tv_sec = inFileInfo->st_mtimespec.tv_sec;
 	times[1].tv_usec = inFileInfo->st_mtimespec.tv_nsec / 1000;
+#elif defined(linux)
+	times[0].tv_sec = inFileInfo->st_atim.tv_sec;
+	times[0].tv_usec = inFileInfo->st_atim.tv_nsec / 1000;
+	times[1].tv_sec = inFileInfo->st_mtim.tv_sec;
+	times[1].tv_usec = inFileInfo->st_mtim.tv_nsec / 1000;
 #endif
 	
 	if (!fileIsCompressable(inFile, inFileInfo, &folderinfo->onAPFS)){

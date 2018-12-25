@@ -10,8 +10,8 @@
 // =============== C++ code =============== //
 #ifndef __cplusplus
 
-typedef struct ParallelFileProcessor ParallelFileProcessor;
-typedef struct FileProcessor FileProcessor;
+typedef void ParallelFileProcessor;
+typedef void FileProcessor;
 
 #else
 

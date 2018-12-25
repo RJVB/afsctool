@@ -236,7 +236,6 @@ class ZFSCommandEngine : public Thread
 public:
 	ZFSCommandEngine(std::string command, size_t outputLen)
 		: theCommand(command)
-		, buf(new char[outputLen])
 		, bufLen(outputLen)
 	{}
 	~ZFSCommandEngine()
@@ -246,7 +245,7 @@ public:
 
 	std::string getOutput()
 	{
-		return buf;
+		return readlen > 0? buf : std::string();
 	}
 
 	std::string& command()
@@ -258,6 +257,7 @@ protected:
 	DWORD Run(LPVOID arg)
 	{
 		CRITSECTLOCK::Scope safe(lock);
+		buf = new char[bufLen];
 		std::string c = theCommand + " 1>&" + ipcPipeWriteEnd + " &";
 		int ret = system(c.c_str());
 		readlen = ret == 0? read(ipcPipes[0], buf, bufLen) : -1;

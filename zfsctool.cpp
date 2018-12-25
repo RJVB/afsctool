@@ -35,7 +35,8 @@
 #endif
 
 #include "afsctool.h"
-#	include "ParallelProcess.h"
+#include "ParallelProcess.h"
+
 static ParallelFileProcessor *PP = NULL;
 static bool exclusive_io = true;
 #include "afsctool_fullversion.h"

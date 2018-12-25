@@ -13,6 +13,11 @@
 typedef struct ParallelFileProcessor ParallelFileProcessor;
 typedef struct FileProcessor FileProcessor;
 
+#else
+
+class ParallelFileProcessor;
+class FileProcessor;
+
 #endif // __cplusplus
 
 // =============== Functions exported to C code =============== //

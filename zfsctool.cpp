@@ -163,15 +163,23 @@ static void signal_handler(int sig)
 	stopParallelProcessor(PP);
 }
 
-bool fileIsCompressable(const char *inFile, struct stat *inFileInfo)
+bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFileProcessor *PP = nullptr)
 {
 	struct statfs fsInfo;
 	errno = 0;
 	int ret = statfs(inFile, &fsInfo);
+	bool retval = false;
 	// TODO
 	// this function needs to call `zfs list $inFile` to see if the file is on a ZFS dataset
 	// if the same info isn't available via fsInfo.
-	return (ret >= 0 && S_ISREG(inFileInfo->st_mode));
+	if (ret >= 0 && S_ISREG(inFileInfo->st_mode)) {
+		if (PP && PP->z_dataSet(inFile)) {
+			// file already has a dataset property: OK to compress
+			retval = true;
+		} else {
+		}
+	}
+	return retval;
 }
 
 /*! Mac OS X basename() can modify the input string when not in 'legacy' mode on 10.6
@@ -230,7 +238,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	times[1].tv_usec = inFileInfo->st_mtim.tv_nsec / 1000;
 #endif
 
-	if (!fileIsCompressable(inFile, inFileInfo)) {
+	if (!fileIsCompressable(inFile, inFileInfo, worker? worker->controller() : nullptr)) {
 		return;
 	}
 	if (filesize > maxSize && maxSize != 0) {
@@ -829,7 +837,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 				if (!folderinfo->check_hard_links || !checkForHardLink(currfile->fts_path, currfile->fts_statp, folderinfo)) {
 					if (folderinfo->compress_files && S_ISREG(currfile->fts_statp->st_mode)) {
 						if (PP) {
-							if (fileIsCompressable(currfile->fts_path, currfile->fts_statp)) {
+							if (fileIsCompressable(currfile->fts_path, currfile->fts_statp, PP)) {
 								addFileToParallelProcessor(PP, currfile->fts_path, currfile->fts_statp, folderinfo, false);
 							} else {
 								process_file(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
@@ -1158,7 +1166,7 @@ next_arg:
 			fi.check_files = fileCheck;
 			fi.backup_file = backupFile;
 			if (PP) {
-				if (fileIsCompressable(fullpath, &fileinfo)) {
+				if (fileIsCompressable(fullpath, &fileinfo, PP)) {
 					addFileToParallelProcessor(PP, fullpath, &fileinfo, &fi, true);
 				} else {
 					process_file(fullpath, NULL, &fileinfo, getParallelProcessorJobInfo(PP));

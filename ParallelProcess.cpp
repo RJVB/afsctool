@@ -117,6 +117,30 @@ ParallelFileProcessor::ParallelFileProcessor(int n, int r, int verbose)
 	ioLockingThread = 0;
 	verboseLevel = verbose;
 	memset( &jobInfo, 0, sizeof(jobInfo) );
+	z_dataSetInfo.set_empty_key(std::string());
+	// there appears to be no reason to invoke set_deleted_key();
+	// let's make sure:
+	z_dataSetInfo.clear();
+}
+
+ParallelFileProcessor::~ParallelFileProcessor()
+{
+	if( verboseLevel > 1 && (listLockConflicts() || ioLock->lockCounter) ){
+		fprintf( stderr, "Queue lock contention: %lux ; IO lock contention %lux\n",
+				 listLockConflicts(), ioLock->lockCounter );
+	}
+	delete ioLock;
+	if( allDoneEvent ){
+		CloseHandle(allDoneEvent);
+	}
+	// delete any remaining values from the z_dataSetInfo map
+	for (auto elem : z_dataSetInfo) {
+		delete elem.second;
+		// the following is valid despite the lack of a call to set_deleted_key():
+		// z_dataSetInfo.erase(elem.first);
+	}
+	// empty the map
+	z_dataSetInfo.clear();
 }
 
 ParallelFileProcessor *createParallelProcessor(int n, int r, int verboseLevel)
@@ -275,6 +299,11 @@ int ParallelFileProcessor::workerDone(FileProcessor *worker)
 		}
 	}
 	return nJobs;
+}
+
+iZFSDataSetCompressionInfo *ParallelFileProcessor::z_dataSet(std::string &name)
+{
+	return nullptr;
 }
 
 // ================================= FileProcessor methods =================================

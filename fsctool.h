@@ -15,6 +15,8 @@
 #include <string.h>
 
 #ifdef __cplusplus
+#include <string>
+
 extern "C" {
 #endif //__cplusplus
 
@@ -57,7 +59,10 @@ struct folder_info
 	bool invert_filetypelist;
 	bool backup_file;
     bool onAPFS;
-#ifdef __cplusplus
+#ifndef __cplusplus
+    void *z_compression;
+#else
+    std::string *z_compression;
 public:
 	folder_info()
 	{
@@ -71,6 +76,10 @@ public:
 	{
 		init(&src);
 	}
+	~folder_info()
+    {
+        delete z_compression;
+    }
 private:
 	void init(const struct folder_info *src)
 	{
@@ -79,6 +88,8 @@ private:
 		// we don't duplicate the filetypeslist!
 		filetypeslist = NULL;
 		filetypeslistlen = filetypeslistsize = 0;
+        // nor the dynamic ZFS properties
+        z_compression = nullptr;
 	}
 #endif
 };

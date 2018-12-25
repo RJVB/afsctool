@@ -13,6 +13,8 @@
 #include <deque>
 #include <string>
 
+#include <sparsehash/dense_hash_map>
+
 #undef MUTEXEX_CAN_TIMEOUT
 #include "Thread/Thread.h"
 
@@ -139,23 +141,28 @@ public:
 	void compress(FileProcessor *worker, ParallelFileProcessor *PP);
 } FileEntry;
 
+// something for zfsctool to store information about ZFS datasets
+// class to be implemented in zfsctool so as not to burden afsctool with it
+class iZFSDataSetCompressionInfo : public std::string
+{
+public:
+	iZFSDataSetCompressionInfo(std::string &name, std::string&)
+		: std::string(name)
+	{}
+	virtual ~iZFSDataSetCompressionInfo()
+	{}
+};
+
+typedef google::dense_hash_map<std::string,iZFSDataSetCompressionInfo*> iZFSDataSetCompressionInfoForFile;
+
 class ParallelFileProcessor : public ParallelProcessor<FileEntry>
 {
 	typedef std::deque<FileProcessor*> PoolType;
 
 public:
 	ParallelFileProcessor(int n=1, int r=0, int verboseLevel=0);
-	virtual ~ParallelFileProcessor()
-	{
-		if( verboseLevel > 1 && (listLockConflicts() || ioLock->lockCounter) ){
-			fprintf( stderr, "Queue lock contention: %lux ; IO lock contention %lux\n",
-					 listLockConflicts(), ioLock->lockCounter );
-		}
-		delete ioLock;
-		if( allDoneEvent ){
-			CloseHandle(allDoneEvent);
-		}
-	}
+	virtual ~ParallelFileProcessor();
+
 	// attempt to lock the ioLock; returns a success value
 	bool lockIO();
 	// unlock the ioLock
@@ -166,12 +173,14 @@ public:
 	// on allDoneEvent before exiting.
 	int run();
 
-	FolderInfo jobInfo;
-
 	inline int verbose() const
 	{
 		return verboseLevel;
 	}
+
+	iZFSDataSetCompressionInfo *z_dataSet(std::string &name);
+
+	FolderInfo jobInfo;
 protected:
 	int workerDone(FileProcessor *worker);
 	// the number of configured or active worker threads
@@ -190,6 +199,8 @@ protected:
 	bool ioLockedFlag;
 	DWORD ioLockingThread;
 	int verboseLevel;
+
+	iZFSDataSetCompressionInfoForFile z_dataSetInfo;
 friend class FileProcessor;
 friend struct FileEntry;
 };
@@ -198,15 +209,15 @@ class FileProcessor : public Thread
 {
 public:
 	FileProcessor(ParallelFileProcessor *PP, bool isReverse, int procID)
-		: PP(PP)
+		: Thread()
+		, PP(PP)
 		, nProcessed(-1)
-		, Thread()
+		, runningTotalRaw(0)
+		, runningTotalCompressed(0)
+		, cpuUsage(0.0)
 		, isBackwards(isReverse)
 		, procID(procID)
 		, scope(NULL)
-		, runningTotalCompressed(0)
-		, runningTotalRaw(0)
-		, cpuUsage(0.0)
 		, currentEntry(NULL)
 	{}
 	~FileProcessor()
@@ -227,6 +238,11 @@ public:
 	inline std::string currentFileName() const
 	{
 		return (currentEntry)? currentEntry->fileName : "";
+	}
+
+	inline ParallelFileProcessor* controller()
+	{
+		return PP;
 	}
 protected:
 	DWORD Run(LPVOID arg);

@@ -21,12 +21,14 @@ set(CMAKE_CXX_STANDARD 11)
 
 find_package(ZLIBP 1.2.8 REQUIRED)
 find_package(SPARSEHASH)
-find_file(LZVN_HEADER "FastCompression.h")
-find_library(LZVN_LIBRARY "FastCompression")
-message(STATUS "LZVN_HEADER,LIB: ${LZVN_HEADER} ${LZVN_LIBRARY}")
+if(APPLE)
+    find_file(LZVN_HEADER "FastCompression.h")
+    find_library(LZVN_LIBRARY "FastCompression")
+    message(STATUS "LZVN_HEADER,LIB: ${LZVN_HEADER} ${LZVN_LIBRARY}")
+    include_directories(${ZLIBP_INCLUDE_DIR})
+endif()
 
-include_directories(${ZLIBP_INCLUDE_DIR}
-    ${SPARSEHASH_INCLUDE_DIR}
+include_directories(${SPARSEHASH_INCLUDE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_SOURCE_DIR}/src)
 link_directories(${SPARSEHASH_LIBRARY})
@@ -34,12 +36,14 @@ add_definitions(-DSUPPORT_PARALLEL)
 if(ZLIB_SINGLESHOT)
     add_definitions(ZLIB_SINGLESHOT_OUTBUF)
 endif()
-if(LZVN_HEADER AND LZVN_LIBRARY)
-    message(STATUS "Enabling LZVN support")
-    add_definitions(-DHAS_LZVN)
-else()
-    message(STATUS "LZVN support is disabled")
-    unset(LZVN_LIBRARY)
+if(APPLE)
+    if(LZVN_HEADER AND LZVN_LIBRARY)
+        message(STATUS "Enabling LZVN support")
+        add_definitions(-DHAS_LZVN)
+    else()
+        message(STATUS "LZVN support is disabled")
+        unset(LZVN_LIBRARY)
+    endif()
 endif()
 
 git_describe(GIT_FULL_VERSION "--tags")
@@ -99,9 +103,10 @@ add_executable(zfsctool
 target_link_libraries(zfsctool ${PKG_SPARSEHASH_LIBRARIES})
 if(APPLE)
     target_link_libraries(zfsctool "-framework CoreServices")
+
+    install(TARGETS afsctool DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 else()
     target_link_libraries(zfsctool "-lrt -ldl -lbsd -pthread")
 endif()
 
-install(TARGETS afsctool DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 FEATURE_SUMMARY(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)

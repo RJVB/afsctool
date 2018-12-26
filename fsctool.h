@@ -104,7 +104,7 @@ extern void compressFile(const char *inFile, struct stat *inFileInfo, struct fol
 #else
 extern void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, void *ignored);
 #endif
-extern long long process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo);
+extern long long process_file_info(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo);
 
 #ifdef __cplusplus
 }

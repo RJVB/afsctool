@@ -90,7 +90,7 @@ void FileEntry::compress(FileProcessor *worker, ParallelFileProcessor *PP)
 		fputs( " .", stderr ); fflush(stderr);
 	}
 	if( PP->verbose() ){
-		compressedSize = (PP)? process_file( fileName.c_str(), NULL, &fileInfo, &PP->jobInfo ) : 0;
+		compressedSize = (PP)? process_file_info( fileName.c_str(), NULL, &fileInfo, &PP->jobInfo ) : 0;
 #ifndef __APPLE__
 		if (folderInfo->data_compressed_size != -1) {
 			compressedSize = folderInfo->data_compressed_size;

@@ -42,6 +42,7 @@
 #include <algorithm>
 #include <iterator>
 #include <vector>
+#include <atomic>
 
 static ParallelFileProcessor *PP = NULL;
 static bool exclusive_io = true;
@@ -171,70 +172,10 @@ static void signal_handler(int sig)
 	stopParallelProcessor(PP);
 }
 
-class ZFSDataSetCompressionInfo : public iZFSDataSetCompressionInfo
-{
-public:
-	ZFSDataSetCompressionInfo(const char *name, const char *compression)
-		: iZFSDataSetCompressionInfo(name, compression)
-		, initialCompression(compression)
-		, currentCompression(compression)
-	{
-		fprintf(stderr, "dataset '%s' has compression '%s'\n",
-				name, compression);
-	}
-	ZFSDataSetCompressionInfo(std::vector<std::string>props)
-		: ZFSDataSetCompressionInfo(props[0].c_str(), props[1].c_str())
-	{}
-
-	virtual ~ZFSDataSetCompressionInfo()
-	{
-		// do something relevant here.
-		resetCompression();
-	}
-
-	bool setCompression(const std::string &newComp)
-	{
-		bool ret = false;
-		if (currentCompression != newComp) {
-			const std::string command = "zfs set compression=" + newComp + " " + *this;
-			fprintf(stderr, "%s\n", command.c_str());
-			// do something like
-			// system(command.c_str());
-			// if success:
-			currentCompression = newComp;
-			ret = true;
-		}
-		return ret;
-	}
-	bool setCompression(const char *compression)
-	{
-		const std::string newComp = compression;
-		return setCompression(newComp);
-	}
-	bool resetCompression()
-	{
-		return setCompression(initialCompression);
-	}
-
-	std::string initialCompression, currentCompression;
-	// we'll probably need something like a semaphore to keep track when the compression can be reset
-	// (= when no more workers are rewriting files on the dataset)
-};
-
-// from http://www.martinbroadhurst.com/how-to-split-a-string-in-c.html:
-template <class Container>
-void split(const std::string &str, Container &cont)
-{
-	std::istringstream iss(str);
-	std::copy(std::istream_iterator<std::string>(iss),
-		std::istream_iterator<std::string>(),
-		std::back_inserter(cont));
-}
-
 class ZFSCommandEngine : public Thread
 {
 public:
-	ZFSCommandEngine(std::string command, size_t outputLen)
+	ZFSCommandEngine(std::string command, size_t outputLen=256)
 		: theCommand(command)
 		, bufLen(outputLen)
 	{}
@@ -256,7 +197,7 @@ public:
 protected:
 	DWORD Run(LPVOID arg)
 	{
-		CRITSECTLOCK::Scope safe(lock);
+		CRITSECTLOCK::Scope lock(critsect);
 		buf = new char[bufLen];
 		std::string c = theCommand + " 1>&" + ipcPipeWriteEnd + " 2>&1 &";
 		int ret = system(c.c_str());
@@ -269,14 +210,109 @@ protected:
 		return ret;
 	}
 	std::string theCommand;
-	static CRITSECTLOCK lock;
+	static CRITSECTLOCK critsect;
 	char *buf = nullptr;
 	size_t bufLen;
 	int readlen = -1;
 public:
 	int error;
 };
-CRITSECTLOCK ZFSCommandEngine::lock(4000);
+CRITSECTLOCK ZFSCommandEngine::critsect(4000);
+
+class ZFSDataSetCompressionInfo : public iZFSDataSetCompressionInfo
+{
+public:
+	ZFSDataSetCompressionInfo(const char *name, const char *compression)
+		: iZFSDataSetCompressionInfo(name, compression)
+		, initialCompression(compression)
+		, currentCompression(compression)
+		, critsect(new CRITSECTLOCK(4000))
+		, refcount(0)
+	{
+		fprintf(stderr, "dataset '%s' has compression '%s'\n",
+				name, compression);
+	}
+	ZFSDataSetCompressionInfo(std::vector<std::string>props)
+		: ZFSDataSetCompressionInfo(props[0].c_str(), props[1].c_str())
+	{}
+
+	virtual ~ZFSDataSetCompressionInfo()
+	{
+		// do something relevant here.
+		_setCompression(initialCompression);
+		delete critsect;
+	}
+
+	// set a new dataset compression. The compresFile() function
+	// can simply call setCompression(newComp) before processing
+	// a file, and call resetCompression() when done. We will ensure
+	// here that the compression is set only once but refcounted on
+	// each attempt to change it. Compression is reset only when
+	// that refcount has gone back to zero meaning no file is still
+	// being processed.
+	bool setCompression(const std::string &newComp)
+	{
+		CRITSECTLOCK::Scope lock(critsect);
+		// increase the refcount regardless of anything will be changed,
+		// to simplify the reset logic. We do this non-atomically because
+		// we're already protected by the locked critical section.
+		refcount += 1;
+		return _setCompression(newComp);
+	}
+	bool setCompression(const char *compression)
+	{
+		const std::string newComp = compression;
+		return setCompression(newComp);
+	}
+	bool resetCompression()
+	{
+		bool retval = false;
+		if (refcount.fetch_sub(1) == 0) {
+			CRITSECTLOCK::Scope lock(critsect);
+			retval = _setCompression(initialCompression);
+		}
+		return retval;
+	}
+
+	std::string initialCompression, currentCompression;
+	// we'll probably need something like a semaphore to keep track when the compression can be reset
+	// (= when no more workers are rewriting files on the dataset)
+
+protected:
+	bool _setCompression(const std::string &newComp)
+	{
+		bool ret = false;
+		if (currentCompression != newComp) {
+			const std::string command = "zfs set compression=" + newComp + " " + *this;
+			fprintf(stderr, "%s\n", command.c_str());
+			// do something like
+// 			auto worker = ZFSCommandEngine(command);
+// 			if (worker.Start() == 0) {
+// 				int exitval = worker.Join();
+// 				if (exitval || worker.getOutput().size() > 0) {
+// 					fprintf(stderr, "error: %s", worker.getOutput().c_str());
+// 				}
+// 			}
+			// on success:
+			currentCompression = newComp;
+			ret = true;
+		}
+		return ret;
+	}
+
+	CRITSECTLOCK *critsect = nullptr;
+	std::atomic_int refcount;
+};
+
+// from http://www.martinbroadhurst.com/how-to-split-a-string-in-c.html:
+template <class Container>
+void split(const std::string &str, Container &cont)
+{
+	std::istringstream iss(str);
+	std::copy(std::istream_iterator<std::string>(iss),
+		std::istream_iterator<std::string>(),
+		std::back_inserter(cont));
+}
 
 typedef uint64_t FSId_t;
 static google::dense_hash_map<FSId_t,iZFSDataSetCompressionInfo*> gZFSDataSetCompressionForFSId;
@@ -324,7 +360,9 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 			iZFSDataSetCompressionInfo *knownDataSet = nullptr;
 			if (gZFSDataSetCompressionForFSId.count(fsId)) {
 				knownDataSet = gZFSDataSetCompressionForFSId[fsId];
-				PP->z_addDataSet(inFile, knownDataSet);
+				if (PP) {
+					PP->z_addDataSet(inFile, knownDataSet);
+				}
 				return true;
 			}
 			std::string fName;
@@ -366,10 +404,16 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 				std::vector<std::string> properties;
 				split(dataSetName, properties);
 				if (properties.size() == 2) {
-					knownDataSet = PP->z_dataSet(properties[0]);
-					auto unknownDataSet = knownDataSet? knownDataSet : new ZFSDataSetCompressionInfo(properties);
-					PP->z_addDataSet(inFile, unknownDataSet);
-					gZFSDataSetCompressionForFSId[fsId] = unknownDataSet;
+					if (PP) {
+						knownDataSet = PP->z_dataSet(properties[0]);
+						auto unknownDataSet = knownDataSet? knownDataSet : new ZFSDataSetCompressionInfo(properties);
+						PP->z_addDataSet(inFile, unknownDataSet);
+						gZFSDataSetCompressionForFSId[fsId] = unknownDataSet;
+					} else {
+						// I don't think this will ever happen so be sloppy until proof of the contrary
+						fprintf(stderr, "Warning: leaking dataset info for %s\n", inFile);
+						gZFSDataSetCompressionForFSId[fsId] = new ZFSDataSetCompressionInfo(properties);
+					}
 					retval = true;
 				} else {
 					fprintf(stderr, "Skipping '%s' because '%s' parses to %lu items\n",
@@ -470,7 +514,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	bool locked = false;
 	// use open() with an exclusive lock so noone can modify the file while we're at it
+#ifdef WE_ARE_FUNCTIONAL
 	int fdIn = open(inFile, O_RDWR | O_EXLOCK);
+#else
+	int fdIn = open(inFile, O_RDONLY | O_EXLOCK);
+#endif
 	if (fdIn == -1) {
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 		goto bail;
@@ -888,36 +936,16 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 
 	printf("%s:\n", filepath);
 
-	// compressed==on-disk filesize: fileinfo->st_blocks * (S_BLKSIZE)?S_BLKSIZE:512
-#ifdef __APPLE__
-	if ((fileinfo->st_flags & UF_COMPRESSED) == 0)
-#else
-	if (true)
-#endif
-	{
-		if (appliedcomp)
-			printf("Unable to compress file.\n");
-		else
-			printf("File is not compressed.\n");
-		filesize = fileinfo->st_size;
-		filesize_rounded = roundToBlkSize(filesize, fileinfo);
-		printf("File size: %s\n", getSizeStr(filesize, filesize_rounded, 1));
-		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
-
-	} else {
-		if (!appliedcomp)
-			printf("File is compressed.\n");
-		filesize = fileinfo->st_size;
-		printf("File size (uncompressed): %s\n", getSizeStr(filesize, filesize, 1));
-		// report the actual file-on-disk size
-		filesize = fileinfo->st_blocks * S_BLKSIZE;
-		filesize_rounded = roundToBlkSize(filesize, fileinfo);
-		printf("File size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
-		printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
-	}
+	filesize = fileinfo->st_size;
+	printf("File size (uncompressed): %s\n", getSizeStr(filesize, filesize, 1));
+	// report the actual file-on-disk size
+	filesize = fileinfo->st_blocks * S_BLKSIZE;
+	filesize_rounded = roundToBlkSize(filesize, fileinfo);
+	printf("File size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
+	printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
 }
 
-long long process_file(const char *filepath, const char* /*filetype*/, struct stat *fileinfo, struct folder_info *folderinfo)
+long long process_file_info(const char *filepath, const char* /*filetype*/, struct stat *fileinfo, struct folder_info *folderinfo)
 {
 	long long int filesize, filesize_rounded, ret;
 
@@ -927,47 +955,29 @@ long long process_file(const char *filepath, const char* /*filetype*/, struct st
 
 	folderinfo->num_files++;
 
-	// compressed==on-disk filesize: fileinfo->st_blocks * (S_BLKSIZE)?S_BLKSIZE:512
-#ifdef __APPLE__
-	if ((fileinfo->st_flags & UF_COMPRESSED) == 0)
-#endif
-	{
-		ret = filesize_rounded = filesize = fileinfo->st_size;
-		filesize_rounded = roundToBlkSize(filesize_rounded, fileinfo);
-		folderinfo->uncompressed_size += filesize;
-		folderinfo->uncompressed_size_rounded += filesize_rounded;
-		folderinfo->compressed_size += filesize;
-		folderinfo->compressed_size_rounded += filesize_rounded;
-		filesize = roundToBlkSize(fileinfo->st_size, fileinfo);
-		folderinfo->total_size += filesize;
-	}
-#ifdef __APPLE__
-	else {
-		if (folderinfo->print_files) {
-			if (folderinfo->print_info > 1) {
-				printf("%s:\n", filepath);
-				filesize = fileinfo->st_size;
-				printf("File size (uncompressed): %s\n", getSizeStr(filesize, filesize, 1));
-				// on-disk file size:
-				filesize = fileinfo->st_blocks * S_BLKSIZE;
-				printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
-			} else if (!folderinfo->compress_files) {
-				printf("%s\n", filepath);
-			}
+	if (folderinfo->print_files) {
+		if (folderinfo->print_info > 1) {
+			printf("%s:\n", filepath);
+			filesize = fileinfo->st_size;
+			printf("File size (uncompressed): %s\n", getSizeStr(filesize, filesize, 1));
+			// on-disk file size:
+			filesize = fileinfo->st_blocks * S_BLKSIZE;
+			printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
+		} else if (!folderinfo->compress_files) {
+			printf("%s\n", filepath);
 		}
-
-		filesize = fileinfo->st_size;
-		filesize_rounded = roundToBlkSize(filesize, fileinfo);
-		folderinfo->uncompressed_size += filesize;
-		folderinfo->uncompressed_size_rounded += filesize_rounded;
-		ret = filesize = fileinfo->st_blocks * S_BLKSIZE;
-		filesize_rounded = roundToBlkSize(filesize, fileinfo);
-		folderinfo->compressed_size += filesize;
-		folderinfo->compressed_size_rounded += filesize_rounded;
-		folderinfo->total_size += filesize;
-		folderinfo->num_compressed++;
 	}
-#endif
+
+	filesize = fileinfo->st_size;
+	filesize_rounded = roundToBlkSize(filesize, fileinfo);
+	folderinfo->uncompressed_size += filesize;
+	folderinfo->uncompressed_size_rounded += filesize_rounded;
+	ret = filesize = fileinfo->st_blocks * S_BLKSIZE;
+	filesize_rounded = roundToBlkSize(filesize, fileinfo);
+	folderinfo->compressed_size += filesize;
+	folderinfo->compressed_size_rounded += filesize_rounded;
+	folderinfo->total_size += filesize;
+	folderinfo->num_compressed++;
 	return ret;
 }
 
@@ -985,7 +995,7 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 	foldersize = folderinfo->uncompressed_size;
 	foldersize_rounded = folderinfo->uncompressed_size_rounded;
 	if ((folderinfo->num_hard_link_files == 0 && folderinfo->num_hard_link_folders == 0) || !hardLinkCheck)
-		printf("Folder size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
+		printf("Folder size (uncompressed): %s\n",
 			   getSizeStr(foldersize, foldersize_rounded, 1));
 	else
 		printf("Folder size (uncompressed): %s\n",
@@ -1033,13 +1043,13 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 							if (fileIsCompressable(currfile->fts_path, currfile->fts_statp, PP)) {
 								addFileToParallelProcessor(PP, currfile->fts_path, currfile->fts_statp, folderinfo, false);
 							} else {
-								process_file(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
+								process_file_info(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
 							}
 						} else {
 							compressFile(currfile->fts_path, currfile->fts_statp, folderinfo, NULL);
 						}
 					}
-					process_file(currfile->fts_path, NULL, currfile->fts_statp, folderinfo);
+					process_file_info(currfile->fts_path, NULL, currfile->fts_statp, folderinfo);
 				} else {
 					folderinfo->num_hard_link_files++;
 
@@ -1276,6 +1286,7 @@ next_arg:
 	snprintf(ipcPipeWriteEnd, sizeof(ipcPipeWriteEnd)/sizeof(char), "%d", ipcPipes[1]);
 
 	gZFSDataSetCompressionForFSId.set_empty_key(0);
+	gZFSDataSetCompressionForFSId.clear();
 
 	if (nJobs > 0) {
 		if (nReverse && !sortQueue) {
@@ -1370,7 +1381,7 @@ next_arg:
 				if (fileIsCompressable(fullpath, &fileinfo, PP)) {
 					addFileToParallelProcessor(PP, fullpath, &fileinfo, &fi, true);
 				} else {
-					process_file(fullpath, NULL, &fileinfo, getParallelProcessorJobInfo(PP));
+					process_file_info(fullpath, NULL, &fileinfo, getParallelProcessorJobInfo(PP));
 				}
 			} else {
 				compressFile(fullpath, &fileinfo, &fi, NULL);
@@ -1408,6 +1419,7 @@ next_arg:
 			folderinfo.minSavings = minSavings;
 			folderinfo.maxSize = maxSize;
 			folderinfo.check_hard_links = hardLinkCheck;
+			folderinfo.backup_file = backupFile;
 			process_folder(currfolder, &folderinfo);
 			folderinfo.num_folders--;
 			if (printVerbose > 0 || !printDir) {

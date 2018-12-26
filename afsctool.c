@@ -1975,7 +1975,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 	}
 }
 
-long long process_file(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo)
+long long process_file_info(const char *filepath, const char *filetype, struct stat *fileinfo, struct folder_info *folderinfo)
 {
 	char *xattrnames, *curr_attr;
 	const char *fileextension = NULL;
@@ -2322,7 +2322,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp, &folderinfo->onAPFS))
 									addFileToParallelProcessor( PP, currfile->fts_path, currfile->fts_statp, folderinfo, false );
 								else
-									process_file(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
+									process_file_info(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
 							}
 							else
 #endif
@@ -2340,7 +2340,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 						}
 #endif
 					}
-					process_file(currfile->fts_path, filetype, currfile->fts_statp, folderinfo);
+					process_file_info(currfile->fts_path, filetype, currfile->fts_statp, folderinfo);
 				}
 				else
 				{
@@ -2827,7 +2827,7 @@ next_arg:;
 				}
 				else
 				{
-					process_file(fullpath, NULL, &fileinfo, getParallelProcessorJobInfo(PP));
+					process_file_info(fullpath, NULL, &fileinfo, getParallelProcessorJobInfo(PP));
 				}
 			}
 			else
@@ -3158,6 +3158,7 @@ next_arg:;
 			folderinfo.numfiletypes = 0;
 			folderinfo.filetypessize = 0;
 			folderinfo.invert_filetypelist = invert_filetypelist;
+			folderinfo.backup_file = backupFile;
 			process_folder(currfolder, &folderinfo);
 			folderinfo.num_folders--;
 			if (printVerbose > 0 || !printDir)

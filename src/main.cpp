@@ -14,8 +14,8 @@ int main (int argc, const char * argv[])
         CFMutableDictionaryRef infoDict = (CFMutableDictionaryRef) CFBundleGetInfoDictionary(mainBundle);
         if (infoDict) {
             CFDictionarySetValue(infoDict, CFSTR("CFBundleIdentifier"), CFSTR("org.brkirch.afsctool"));
-            CFDictionarySetValue(infoDict, CFSTR("CFBundleName"), CFSTR("AFSCtool"));
-            CFDictionarySetValue(infoDict, CFSTR("CFBundleDisplayName"), CFSTR("AFSCtool"));
+            CFDictionarySetValue(infoDict, CFSTR("CFBundleName"), CFSTR("AFSCTool"));
+            CFDictionarySetValue(infoDict, CFSTR("CFBundleDisplayName"), CFSTR("AFSCTool"));
             CFDictionarySetValue(infoDict, CFSTR("NSAppSleepDisabled"), CFSTR("1"));
             CFDictionarySetValue(infoDict, CFSTR("NSSupportsAutomaticTermination"), CFSTR("0"));
         }

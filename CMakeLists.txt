@@ -25,7 +25,10 @@ find_file(LZVN_HEADER "FastCompression.h")
 find_library(LZVN_LIBRARY "FastCompression")
 message(STATUS "LZVN_HEADER,LIB: ${LZVN_HEADER} ${LZVN_LIBRARY}")
 
-include_directories(${ZLIBP_INCLUDE_DIR} ${SPARSEHASH_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+include_directories(${ZLIBP_INCLUDE_DIR}
+    ${SPARSEHASH_INCLUDE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_SOURCE_DIR}/src)
 link_directories(${SPARSEHASH_LIBRARY})
 add_definitions(-DSUPPORT_PARALLEL)
 if(ZLIB_SINGLESHOT)
@@ -60,23 +63,23 @@ endif()
 configure_file(afsctool_fullversion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/afsctool_fullversion.h)
 
 add_library(PP OBJECT
-    ParallelProcess.cpp
-    Thread/Thread.cpp
-    CritSectEx/CritSectEx.cpp
-    CritSectEx/msemul.cpp
-    CritSectEx/timing.c
+    src/ParallelProcess.cpp
+    src/Thread/Thread.cpp
+    src/CritSectEx/CritSectEx.cpp
+    src/CritSectEx/msemul.cpp
+    src/CritSectEx/timing.c
 )
 
 add_executable(afsctool
-    afsctool.c
-    main.cpp
+    src/afsctool.c
+    src/main.cpp
     $<TARGET_OBJECTS:PP>
 )
 if(HFSCOMPRESS_TO_ZFS)
     set_source_files_properties(afsctool.c PROPERTIES COMPILE_DEFINITIONS HFSCOMPRESS_TO_ZFS)
 endif()
 
-target_include_directories(afsctool PRIVATE ${CMAKE_SOURCE_DIR})
+# target_include_directories(afsctool PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
 set_target_properties(afsctool PROPERTIES
     LINK_FLAGS "${ZLIBP_LIBRARY_LDFLAGS}")
 target_link_libraries(afsctool ${ZLIBP_LIBRARIES} ${PKG_SPARSEHASH_LIBRARIES})
@@ -90,7 +93,7 @@ else()
 endif()
 
 add_executable(zfsctool
-    zfsctool.cpp
+    src/zfsctool.cpp
     $<TARGET_OBJECTS:PP>
 )
 target_link_libraries(zfsctool ${PKG_SPARSEHASH_LIBRARIES})

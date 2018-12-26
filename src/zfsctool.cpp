@@ -24,6 +24,7 @@
 
 #ifdef __APPLE__
 #	include <sys/attr.h>
+#	include <CoreFoundation/CoreFoundation.h>
 #else
 #include <bsd/stdlib.h>
 #include <endian.h>
@@ -1596,5 +1597,18 @@ next_arg:
 
 int main (int argc, const char * argv[])
 {
+#ifdef __APPLE__
+    CFBundleRef mainBundle = CFBundleGetMainBundle();
+    if (mainBundle) {
+        CFMutableDictionaryRef infoDict = (CFMutableDictionaryRef) CFBundleGetInfoDictionary(mainBundle);
+        if (infoDict) {
+            CFDictionarySetValue(infoDict, CFSTR("CFBundleIdentifier"), CFSTR("org.RJVB.zfsctool"));
+            CFDictionarySetValue(infoDict, CFSTR("CFBundleName"), CFSTR("ZFSCTool"));
+            CFDictionarySetValue(infoDict, CFSTR("CFBundleDisplayName"), CFSTR("ZFSCTool"));
+            CFDictionarySetValue(infoDict, CFSTR("NSAppSleepDisabled"), CFSTR("1"));
+            CFDictionarySetValue(infoDict, CFSTR("NSSupportsAutomaticTermination"), CFSTR("0"));
+        }
+    }
+#endif
     return zfsctool(argc, argv);
 }

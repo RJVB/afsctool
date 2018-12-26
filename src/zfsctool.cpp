@@ -88,7 +88,8 @@ char *getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 	for (unit2 = 0; unit2 + 1 < sizeunits && (size_rounded / sizeunit2[unit2 + 1]) > 0; unit2++);
 	for (unit10 = 0; unit10 + 1 < sizeunits && (size_rounded / sizeunit10[unit10 + 1]) > 0; unit10++);
 
-	snprintf(sizeStr, len, "%lld bytes", size);
+	int remLen = len - snprintf(sizeStr, len, "%lld bytes", size);
+	char *cursor = &sizeStr[strlen(sizeStr)];
 
 #ifdef PRINT_SI_SIZES
 	int print_si_sizes = 1;
@@ -100,16 +101,16 @@ char *getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 		// determining if the human-readable value is > 0.
 		switch (unit10) {
 			case 0:
-				snprintf(sizeStr, len, "%s / %0.0f %s (%s, base-10)", sizeStr,
+				snprintf(cursor, remLen, " / %0.0f %s (%s, base-10)",
 						 (double) size_rounded / sizeunit10[unit10], sizeunit10_short[unit10], sizeunit10_long[unit10]);
 				break;
 			case 1:
-				snprintf(sizeStr, len, "%s / %.12g %s (%s, base-10)", sizeStr,
+				snprintf(cursor, remLen, " / %.12g %s (%s, base-10)",
 						 (double)(((long long int)((double) size_rounded / sizeunit10[unit10] * 100) + 5) / 10) / 10,
 						 sizeunit10_short[unit10], sizeunit10_long[unit10]);
 				break;
 			default:
-				snprintf(sizeStr, len, "%s / %0.12g %s (%s, base-10)", sizeStr,
+				snprintf(cursor, remLen, " / %0.12g %s (%s, base-10)",
 						 (double)(((long long int)((double) size_rounded / sizeunit10[unit10] * 1000) + 5) / 10) / 100,
 						 sizeunit10_short[unit10], sizeunit10_long[unit10]);
 				break;
@@ -123,22 +124,19 @@ char *getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 				// to check if the human readable value is sensical...
 				humanReadable = (double) size_rounded / sizeunit2[unit2];
 				if (humanReadable >= 1) {
-					snprintf(sizeStr, len, "%s / %0.0f %s", sizeStr,
-							 humanReadable, sizeunit2_short[unit2]);
+					snprintf(cursor, remLen, " / %0.0f %s", humanReadable, sizeunit2_short[unit2]);
 				}
 				break;
 			case 1:
 				humanReadable = (double)(((long long int)((double) size_rounded / sizeunit2[unit2] * 100) + 5) / 10) / 10;
 				if (humanReadable > 0) {
-					snprintf(sizeStr, len, "%s / %.12g %s", sizeStr,
-							 humanReadable, sizeunit2_short[unit2]);
+					snprintf(cursor, remLen, " / %.12g %s", humanReadable, sizeunit2_short[unit2]);
 				}
 				break;
 			default:
 				humanReadable = (double)(((long long int)((double) size_rounded / sizeunit2[unit2] * 1000) + 5) / 10) / 100;
 				if (humanReadable > 0) {
-					snprintf(sizeStr, len, "%s / %0.12g %s", sizeStr,
-							 humanReadable, sizeunit2_short[unit2]);
+					snprintf(cursor, remLen, " / %0.12g %s", humanReadable, sizeunit2_short[unit2]);
 				}
 				break;
 		}

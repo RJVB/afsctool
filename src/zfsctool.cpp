@@ -938,11 +938,11 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 	printf("%s:\n", filepath);
 
 	filesize = fileinfo->st_size;
-	printf("File size (uncompressed): %s\n", getSizeStr(filesize, filesize, 1));
+	printf("File size (real): %s\n", getSizeStr(filesize, filesize, 1));
 	// report the actual file-on-disk size
 	filesize = fileinfo->st_blocks * S_BLKSIZE;
 	filesize_rounded = roundToBlkSize(filesize, fileinfo);
-	printf("File size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
+	printf("File size (on disk): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 	printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
 }
 
@@ -960,7 +960,7 @@ long long process_file_info(const char *filepath, const char* /*filetype*/, stru
 		if (folderinfo->print_info > 1) {
 			printf("%s:\n", filepath);
 			filesize = fileinfo->st_size;
-			printf("File size (uncompressed): %s\n", getSizeStr(filesize, filesize, 1));
+			printf("File size (real): %s\n", getSizeStr(filesize, filesize, 1));
 			// on-disk file size:
 			filesize = fileinfo->st_blocks * S_BLKSIZE;
 			printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
@@ -996,14 +996,14 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 	foldersize = folderinfo->uncompressed_size;
 	foldersize_rounded = folderinfo->uncompressed_size_rounded;
 	if ((folderinfo->num_hard_link_files == 0 && folderinfo->num_hard_link_folders == 0) || !hardLinkCheck)
-		printf("Folder size (uncompressed): %s\n",
+		printf("Folder size (real): %s\n",
 			   getSizeStr(foldersize, foldersize_rounded, 1));
 	else
-		printf("Folder size (uncompressed): %s\n",
+		printf("Folder size (real): %s\n",
 			   getSizeStr(foldersize, foldersize_rounded, 0));
 	foldersize = folderinfo->compressed_size;
 	foldersize_rounded = folderinfo->compressed_size_rounded;
-	printf("Folder size (compressed): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
+	printf("Folder size (on disk): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
 	printf("Compression savings: %0.1f%%\n", (1.0 - ((float)(folderinfo->compressed_size) / folderinfo->uncompressed_size)) * 100.0);
 	foldersize = folderinfo->total_size;
 	printf("Approximate total folder size (files + file overhead + folder overhead): %s\n",
@@ -1480,14 +1480,14 @@ next_arg:
 								printf("File(s) size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
 									   getSizeStr(filesize, filesize_rounded, 1));
 							else
-								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
+								printf("File(s) size (real): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							filesize = folderinfo.filetypes[i].compressed_size;
 							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded;
 							printf("File(s) size (compressed - decmpfs xattr): %s\n",
 								   getSizeStr(filesize, filesize_rounded, 0));
 							filesize = folderinfo.filetypes[i].compressed_size + folderinfo.filetypes[i].compattr_size;
 							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded + folderinfo.filetypes[i].compattr_size;
-							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
+							printf("File(s) size (on disk): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							printf("Compression savings: %0.1f%%\n", (1.0 - ((float)(folderinfo.filetypes[i].compressed_size + folderinfo.filetypes[i].compattr_size) / folderinfo.filetypes[i].uncompressed_size)) * 100.0);
 							filesize = folderinfo.filetypes[i].total_size;
 							printf("Approximate total file(s) size (files + file overhead): %s\n",
@@ -1519,14 +1519,14 @@ next_arg:
 								printf("File(s) size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
 									   getSizeStr(filesize, filesize_rounded, 1));
 							else
-								printf("File(s) size (uncompressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
+								printf("File(s) size (real): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							filesize = alltypesinfo.compressed_size;
 							filesize_rounded = alltypesinfo.compressed_size_rounded;
 							printf("File(s) size (compressed - decmpfs xattr): %s\n",
 								   getSizeStr(filesize, filesize_rounded, 0));
 							filesize = alltypesinfo.compressed_size + alltypesinfo.compattr_size;
 							filesize_rounded = alltypesinfo.compressed_size_rounded + alltypesinfo.compattr_size;
-							printf("File(s) size (compressed): %s\n", getSizeStr(filesize, filesize_rounded, 0));
+							printf("File(s) size (on disk): %s\n", getSizeStr(filesize, filesize_rounded, 0));
 							printf("Compression savings: %0.1f%%\n", (1.0 - ((float)(alltypesinfo.compressed_size + alltypesinfo.compattr_size) / alltypesinfo.uncompressed_size)) * 100.0);
 							filesize = alltypesinfo.total_size;
 							printf("Approximate total file(s) size (files + file overhead): %s\n",
@@ -1564,11 +1564,20 @@ next_arg:
 		if (sortQueue) {
 			sortFilesInParallelProcessorBySize(PP);
 		}
-		if (filesInParallelProcessor(PP)) {
+		if (size_t nFiles = filesInParallelProcessor(PP)) {
+			if (nJobs > nFiles) {
+				nJobs = nFiles;
+				if (nJobs < nReverse) {
+					// user asked a certain amount of reverse jobs;
+					// respect that as well if we can
+					nReverse = nJobs;
+				}
+				changeParallelProcessorJobs(PP, nJobs, nReverse);
+			}
 			signal(SIGINT, signal_handler);
 			signal(SIGHUP, signal_handler);
-			fprintf(stderr, "Starting %d worker threads to process queue with %lu items\n",
-					nJobs, filesInParallelProcessor(PP));
+			fprintf(stderr, "Starting %d worker thread(s) to process queue with %lu item(s)\n",
+					nJobs, nFiles);
 			int processed = runParallelProcessor(PP);
 			fprintf(stderr, "Processed %d entries\n", processed);
 			if (printVerbose > 0) {

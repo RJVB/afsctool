@@ -181,6 +181,17 @@ bool ParallelFileProcessor::unLockIO()
 	return ioLockedFlag;
 }
 
+// change the number of jobs
+bool ParallelFileProcessor::setJobs(int n, int r)
+{
+	if (threadPool.empty() && n > 0 && n >= r) {
+		nJobs = n;
+		nReverse = r;
+		return true;
+	}
+	return false;
+}
+
 int ParallelFileProcessor::run()
 { FileEntry entry;
   int i, nRequested = nJobs;
@@ -213,7 +224,6 @@ int ParallelFileProcessor::run()
 		// finished. Using size()==0 as a stopping criterium caused the processing interrupts
 		// that were observed with large files.
 		while( nJobs >= 1 && !quitRequested() && waitResult != WAIT_OBJECT_0 ){
-			waitResult = WaitForSingleObject( allDoneEvent, 2000 );
 			if( nJobs ){
 			 double perc = 100.0 * nProcessed / N;
 				 if( perc >= prevPerc + 10 ){
@@ -231,6 +241,7 @@ int ParallelFileProcessor::run()
 					 prevPerc = perc;
 				 }
 			}
+			waitResult = WaitForSingleObject( allDoneEvent, 2000 );
 		}
 		if( (quitRequested() && !threadPool.empty()) || nProcessing > 0 ){
 			// the WaitForSingleObject() call above was interrupted by the signal that
@@ -390,8 +401,8 @@ DWORD FileProcessor::Run(LPVOID arg)
 
 void FileProcessor::InitThread()
 {
-	char name[16];
-	snprintf( name, 16, "FilePr #%d", procID );
+	char name[32];
+	snprintf( name, sizeof(name), "FilePr #%d", procID );
 #ifdef __MACH__
 	pthread_setname_np(name);
 	memset( &threadInfo, 0, sizeof(threadInfo) );
@@ -511,6 +522,14 @@ int currentParallelProcessorID(FileProcessor *worker)
 		procID = worker->processorID();
 	}
 	return procID;
+}
+
+bool changeParallelProcessorJobs(ParallelFileProcessor *p, const int n, const int r)
+{
+	if( p ){
+		return p->setJobs(n, r);
+	}
+	return false;
 }
 
 int runParallelProcessor(ParallelFileProcessor *p)

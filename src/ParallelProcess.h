@@ -37,6 +37,7 @@ bool lockParallelProcessorIO(FileProcessor *worker);
 // unlock the ioLock if it was previously locked by a call to lockParallelProcessorIO()
 bool unLockParallelProcessorIO(FileProcessor *worker);
 int currentParallelProcessorID(FileProcessor *worker);
+bool changeParallelProcessorJobs(ParallelFileProcessor *p, const int n, const int r);
 int runParallelProcessor(ParallelFileProcessor *p);
 void stopParallelProcessor(ParallelFileProcessor *p);
 struct folder_info *getParallelProcessorJobInfo(ParallelFileProcessor *p);

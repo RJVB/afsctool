@@ -3333,12 +3333,22 @@ next_arg:;
 		{
 			sortFilesInParallelProcessorBySize(PP);
 		}
-		if (filesInParallelProcessor(PP))
+		size_t nFiles = filesInParallelProcessor(PP);
+		if (nFiles)
 		{
+			if (nJobs > nFiles) {
+				nJobs = nFiles;
+				if (nJobs < nReverse) {
+					// user asked a certain amount of reverse jobs;
+					// respect that as well if we can
+					nReverse = nJobs;
+				}
+				changeParallelProcessorJobs(PP, nJobs, nReverse);
+			}
 			signal(SIGINT, signal_handler);
 			signal(SIGHUP, signal_handler);
 			fprintf( stderr, "Starting %d worker threads to process queue with %lu items\n",
-				nJobs, filesInParallelProcessor(PP) );
+				nJobs, nFiles );
 			int processed = runParallelProcessor(PP);
 			fprintf( stderr, "Processed %d entries\n", processed );
 			if (printVerbose > 0)

@@ -173,6 +173,9 @@ public:
 	// unlock the ioLock
 	bool unLockIO();
 
+	// change the number of jobs. Can only be done before calling run()
+	bool setJobs(int n, int r);
+
 	// spawn the requested number of worker threads and let them
 	// empty the queue. After spawning the workers, run() waits
 	// on allDoneEvent before exiting.
@@ -234,6 +237,7 @@ public:
 		, runningTotalRaw(0)
 		, runningTotalCompressed(0)
 		, cpuUsage(0.0)
+		, cleanedUp(false)
 		, isBackwards(isReverse)
 		, procID(procID)
 		, scope(NULL)
@@ -242,6 +246,7 @@ public:
 	~FileProcessor()
     {
 		// better be safe than sorry
+		CleanupThread();
 		PP = NULL;
 		scope = NULL;
 		currentEntry = NULL;
@@ -269,8 +274,9 @@ protected:
 
 	void CleanupThread()
 	{
-		if( PP ){
+		if( PP && !cleanedUp ){
 			PP->workerDone(this);
+			cleanedUp = true;
 		}
 	}
 
@@ -278,6 +284,7 @@ protected:
 	volatile long nProcessed;
 	volatile long long runningTotalRaw, runningTotalCompressed;
 	volatile double cpuUsage, userTime, systemTime;
+	bool cleanedUp;
 	const bool isBackwards;
 	const int procID;
 	CRITSECTLOCK::Scope *scope;

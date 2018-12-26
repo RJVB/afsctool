@@ -97,3 +97,28 @@ default:
 cd afsctool/build
 sudo make install/fast V=1 VERBOSE=1
 ```
+
+# A word about the other executable (zfsctool)
+
+This repository also builds another utility, `zfsctool`.
+
+## zfsctool
+
+This is a stripped-down and adapted version of `afsctool`, aiming to provide a comparable
+offline/post-hoc *re*compression of selected files and folders on ZFS as `afsctool` does
+on HFS+ and APFS.
+
+ZFS is organised in `datasets` (roughly comparable to partitions), and offers true transparent
+in-filesystem compression. Because of this, one typically uses a reasonably efficient but fast
+compressor (like lz4). Compression is set at the dataset level, but files are compressed with
+the codec in used when they were written (and that means they can contain chunks compressed with
+different compressors). Afsctool-like recompression can thus be obtained by changing the dataset
+compression property, rewriting all files of interest, and resetting the compression property.
+Contrary to HFS this will also affect any other files being written during the rewrite but that's
+life.
+
+Zfsctool is a work in progress that doesn't yet do anything except for printing out statistics.
+There is not currently an API provided by the ZFS libraries which allow getting or setting the
+compression property so I use the `zfs` driver command and parse its output (striving very hard
+to call the command as little as possible; once per dataset during the file collection phase).
+As a bonus, `zfsctool` only has a runtime dependency on ZFS.

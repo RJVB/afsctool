@@ -746,6 +746,7 @@ bail:
 	xfree(outBuf);
 }
 
+// TODO: rewrite to use a ino_t->std::string hashmap
 bool checkForHardLink(const char *filepath, const struct stat *fileInfo, const struct folder_info *folderinfo)
 {
 	static ino_t *hardLinks = NULL;

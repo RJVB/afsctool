@@ -258,7 +258,7 @@ protected:
 	{
 		CRITSECTLOCK::Scope safe(lock);
 		buf = new char[bufLen];
-		std::string c = theCommand + " 1>&" + ipcPipeWriteEnd + " &";
+		std::string c = theCommand + " 1>&" + ipcPipeWriteEnd + " 2>&1 &";
 		int ret = system(c.c_str());
 		readlen = ret == 0? read(ipcPipes[0], buf, bufLen) : -1;
 		if (readlen > 1 && buf[readlen-1] == '\n') {

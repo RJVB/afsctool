@@ -2,17 +2,18 @@
 BuildItems=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x00)
 
 [CMake]
-Build Directory Count=2
-Current Build Directory Index=1
-Current Build Directory Index-Host System=1
+Build Directory Count=3
+Current Build Directory Index=2
+Current Build Directory Index-Host System=2
 ProjectRootRelative=./
+Temporary Build Directory Index=2
 
 [CMake][CMake Build Directory 0]
 Build Directory Path=file:///Users/bertin/cworks/MacOSX/afsctool_34/build
 Build Type=MacPorts
-CMake Binary=/opt/local/bin/cmake
+CMake Binary=/opt/local/bin/cmake-kf5-mp
 Environment Profile=KDE/MacPorts
-Extra Arguments=-DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_NAME_DIR=/opt/local/lib -DCMAKE_SYSTEM_PREFIX_PATH="/opt/local;/usr" -DCMAKE_MODULE_PATH=/opt/local/share/cmake/Modules -DCMAKE_FIND_FRAMEWORK=LAST -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -Wno-dev -DCMAKE_STRIP:PATH=/bin/echo -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DINCLUDE_DIRECTORIES:PATH="-I/opt/local/include" -DCMAKE_INSTALL_RPATH="/opt/local/lib" -DCMAKE_OSX_ARCHITECTURES="x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.9" -DCMAKE_OSX_SYSROOT="/" -DCMAKE_CXX_COMPILER=clazy-mp-3.9
+Extra Arguments=-Wno-dev -DCMAKE_C_COMPILER=clang-mp-5.0 -DCMAKE_CXX_COMPILER=clang++-mp-5.0
 Install Directory=/opt/local
 
 [CMake][CMake Build Directory 1]
@@ -22,6 +23,16 @@ CMake Binary=/opt/local/bin/cmake2port_noserver
 CMake Executable=/opt/local/bin/cmake2port_noserver
 Environment Profile=
 Extra Arguments=-nvok --port afsctool --configure.optflags "-O3 -march=native -mdynamic-no-pic -g" configure.compiler=macports-clang-5.0
+Install Directory=/opt/local
+Runtime=Host System
+
+[CMake][CMake Build Directory 2]
+Build Directory Path=file:///home/bertin/cworks/MacOSX/afsctool_34/build
+Build Type=MacPorts
+CMake Binary=/opt/local/bin/cmake-kf5-mp
+CMake Executable=/opt/local/bin/cmake-kf5-mp
+Environment Profile=
+Extra Arguments=-Wno-dev -DCMAKE_C_COMPILER=clang-mp-5.0 -DCMAKE_CXX_COMPILER=clang++-mp-5.0
 Install Directory=/opt/local
 Runtime=Host System
 

@@ -28,6 +28,7 @@
 #else
 #include <bsd/stdlib.h>
 #include <endian.h>
+#include <sys/types.h>
 #include <sys/vfs.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -282,7 +283,7 @@ protected:
 	{
 		bool ret = false;
 		if (currentCompression != newComp) {
-			const std::string command = "zfs set compression=" + newComp + " " + *this;
+			const std::string command = "zfs set compression=" + newComp + " \"" + *this + "\"";
 			fprintf(stderr, "%s\n", command.c_str());
 			// do something like
 // 			auto worker = ZFSCommandEngine(command);
@@ -305,12 +306,13 @@ protected:
 
 // from http://www.martinbroadhurst.com/how-to-split-a-string-in-c.html:
 template <class Container>
-void split(const std::string &str, Container &cont)
+void split(const std::string &str, Container &cont, char delim='\t')
 {
-	std::istringstream iss(str);
-	std::copy(std::istream_iterator<std::string>(iss),
-		std::istream_iterator<std::string>(),
-		std::back_inserter(cont));
+    std::stringstream ss(str);
+    std::string token;
+    while (std::getline(ss, token, delim)) {
+        cont.push_back(token);
+    }
 }
 
 typedef uint64_t FSId_t;
@@ -330,6 +332,17 @@ static google::dense_hash_map<FSId_t,iZFSDataSetCompressionInfo*> gZFSDataSetCom
 		return e.id;
 	}
 #endif
+
+static std::string makeAbsolute(const char *name)
+{
+	std::string absName;
+	const char *rp = realpath(name, nullptr);
+	if (rp) {
+		absName = rp;
+		xfree(rp);
+	}
+	return absName;
+}
 
 bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFileProcessor *PP = nullptr)
 {
@@ -351,7 +364,7 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 	// TODO
 	// this function needs to call `zfs list $inFile` to see if the file is on a ZFS dataset
 	// if the same info isn't available via fsInfo.
-	if (ret >= 0 && S_ISREG(inFileInfo->st_mode) && _isZFS) {
+	if (ret >= 0 && (S_ISREG(inFileInfo->st_mode) || S_ISLNK(inFileInfo->st_mode)) && _isZFS) {
 		if (PP && PP->z_dataSetForFile(inFile)) {
 			// file already has a dataset property: OK to compress
 			return true;
@@ -365,15 +378,20 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 				return true;
 			}
 			std::string fName;
-			if (inFile[0] != '/') {
-				const char *cwd = getcwd(NULL, 0);
-				if (!cwd) {
+			if (S_ISLNK(inFileInfo->st_mode)) {
+				fName = makeAbsolute(inFile);
+				if (fName.empty()) {
+					fprintf(stderr, "skipping link '%s' because cannot determine its target (%s)\n",
+							inFile, strerror(errno));
+					return false;
+				}
+			} else if (inFile[0] != '/') {
+				fName = makeAbsolute(inFile);
+				if (fName.empty()) {
 					fprintf(stderr, "skipping '%s' because cannot determine $PWD (%s)\n",
 							inFile, strerror(errno));
 					return false;
 				}
-				fName = std::string(cwd) + "/" + inFile;
-				xfree(cwd);
 			} else {
 				fName = inFile;
 			}
@@ -381,7 +399,7 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 			// current zfs driver command will return a name if the path begins with a
 			// valid dataset mountpoint, or else return an error;
 			std::string dataSetName;
-			auto worker = ZFSCommandEngine("zfs list -H -o name,compression " + fName, MAXPATHLEN);
+			auto worker = ZFSCommandEngine("zfs list -H -o name,compression \"" + fName + "\"", MAXPATHLEN);
 			if (worker.Start() == 0) {
 				if (int exitval = worker.Join()) {
 					fprintf(stderr, "\t`%s` returned %d (%s)\n", worker.command().c_str(), exitval, strerror(worker.error));
@@ -1151,12 +1169,13 @@ int zfsctool(int argc, const char *argv[])
 					sscanf(argv[i], "%lld", &maxSize);
 					j = strlen(argv[i]) - 1;
 					break;
-				case 'T':
+				case 'T': {
 					if (j + 1 < strlen(argv[i]) || i + 2 > argc) {
 						printUsage();
 						return(EINVAL);
 					}
 					i++;
+					const char *comp = argv[i];
 					{
 						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
 						printUsage();
@@ -1164,6 +1183,7 @@ int zfsctool(int argc, const char *argv[])
 					}
 					j = strlen(argv[i]) - 1;
 					break;
+				}
 				case 'b':
 					if (!applycomp) {
 						printUsage();

@@ -145,7 +145,8 @@ public:
 	void compress(FileProcessor *worker, ParallelFileProcessor *PP);
 } FileEntry;
 
-// something for zfsctool to store information about ZFS datasets
+// something for zfsctool to store information about ZFS datasets,
+// where the base class is a std::string holding the dataset name.
 // class to be implemented in zfsctool so as not to burden afsctool with it
 class iZFSDataSetCompressionInfo : public std::string
 {

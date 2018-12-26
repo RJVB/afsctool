@@ -278,20 +278,55 @@ public:
 };
 CRITSECTLOCK ZFSCommandEngine::lock(4000);
 
+typedef uint64_t FSId_t;
+static google::dense_hash_map<FSId_t,iZFSDataSetCompressionInfo*> gZFSDataSetCompressionForFSId;
+#if defined(linux)
+	FSId_t mkFSId_t(__fsid_t id)
+	{
+		union { int val[2]; uint64_t id; } e;
+		memcpy( &e.val, &id.__val, sizeof(e.val));
+		return e.id;
+	}
+#elif defined(__APPLE__)
+	FSId_t mkFSId_t(fsid_t id)
+	{
+		union { int val[2]; uint64_t id; } e;
+		memcpy( &e.val, &id.val, sizeof(e.val));
+		return e.id;
+	}
+#endif
+
 bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFileProcessor *PP = nullptr)
 {
 	struct statfs fsInfo;
 	errno = 0;
 	int ret = statfs(inFile, &fsInfo);
-	bool retval = false;
+	bool retval = false, _isZFS = false;
+	FSId_t fsId = mkFSId_t(fsInfo.f_fsid);
+#if defined(__APPLE__)
+	// https://github.com/RJVB/afsctool/pull/1#issuecomment-352727426
+	uint32_t MNTTYPE_ZFS_SUBTYPE = 'Z'<<24|'F'<<16|'S'<<8;
+	_isZFS = (fsInfo.f_fssubtype == MNTTYPE_ZFS_SUBTYPE);
+#elif defined(linux)
+#	ifndef S_MAGIC_ZFS
+#		define S_MAGIC_ZFS 0x2FC12FC1
+#	endif
+	_isZFS = (fsInfo.f_type == S_MAGIC_ZFS);
+#endif
 	// TODO
 	// this function needs to call `zfs list $inFile` to see if the file is on a ZFS dataset
 	// if the same info isn't available via fsInfo.
-	if (ret >= 0 && S_ISREG(inFileInfo->st_mode)) {
+	if (ret >= 0 && S_ISREG(inFileInfo->st_mode) && _isZFS) {
 		if (PP && PP->z_dataSetForFile(inFile)) {
 			// file already has a dataset property: OK to compress
-			retval = true;
+			return true;
 		} else {
+			iZFSDataSetCompressionInfo *knownDataSet = nullptr;
+			if (gZFSDataSetCompressionForFSId.count(fsId)) {
+				knownDataSet = gZFSDataSetCompressionForFSId[fsId];
+				PP->z_addDataSet(inFile, knownDataSet);
+				return true;
+			}
 			std::string fName;
 			if (inFile[0] != '/') {
 				const char *cwd = getcwd(NULL, 0);
@@ -331,8 +366,10 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 				std::vector<std::string> properties;
 				split(dataSetName, properties);
 				if (properties.size() == 2) {
-					auto knownDataSet = PP->z_dataSet(properties[0]);
-					PP->z_addDataSet(inFile, knownDataSet? knownDataSet : new ZFSDataSetCompressionInfo(properties));
+					knownDataSet = PP->z_dataSet(properties[0]);
+					auto unknownDataSet = knownDataSet? knownDataSet : new ZFSDataSetCompressionInfo(properties);
+					PP->z_addDataSet(inFile, unknownDataSet);
+					gZFSDataSetCompressionForFSId[fsId] = unknownDataSet;
 					retval = true;
 				} else {
 					fprintf(stderr, "Skipping '%s' because '%s' parses to %lu items\n",
@@ -1237,6 +1274,8 @@ next_arg:
 		return errno;
 	}
 	snprintf(ipcPipeWriteEnd, sizeof(ipcPipeWriteEnd)/sizeof(char), "%d", ipcPipes[1]);
+
+	gZFSDataSetCompressionForFSId.set_empty_key(0);
 
 	if (nJobs > 0) {
 		if (nReverse && !sortQueue) {

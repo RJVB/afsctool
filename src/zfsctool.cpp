@@ -1076,8 +1076,8 @@ void printUsage()
 	   "-n Do not verify files after compression (not recommended)\n"
 	   "-m <size> Largest file size to compress, in bytes\n"
 	   "-b make a backup of files before compressing them\n"
-	   "-jN compress (only compressable) files using <N> threads (compression is concurrent, disk IO is exclusive)\n"
-	   "-JN read, compress and write files (only compressable ones) using <N> threads (everything is concurrent except writing the compressed file)\n"
+	   "-jN compress (only compressable) files using <N> threads (disk IO is exclusive)\n"
+	   "-JN read, compress and write files (only compressable ones) using <N> threads (everything is concurrent)\n"
 	   "-S sort the item list by file size (leaving the largest files to the end may be beneficial if the target volume is almost full)\n"
 	   "-RM <M> of the <N> workers will work the item list (must be sorted!) in reverse order, starting with the largest files\n"
 	   "-T <compressor> Compression type to use, chosen from the supported ZFS compression types\n"
@@ -1095,7 +1095,7 @@ int zfsctool(int argc, const char *argv[])
 	compression_type compressiontype = ZLIB;
 	double minSavings = 0.0;
 	long long int maxSize = 0;
-	bool printDir = FALSE, decomp = FALSE, createfile = FALSE, extractfile = FALSE, applycomp = FALSE,
+	bool printDir = FALSE, createfile = FALSE, applycomp = FALSE,
 		 fileCheck = TRUE, argIsFile, hardLinkCheck = FALSE, dstIsFile, free_src = FALSE, free_dst = FALSE,
 		 allowLargeBlocks = FALSE, backupFile = FALSE;
 	int nJobs = 0, nReverse = 0;
@@ -1114,102 +1114,43 @@ int zfsctool(int argc, const char *argv[])
 		for (j = 1; j < strlen(argv[i]); j++) {
 			switch (argv[i][j]) {
 				case 'l':
-					if (createfile || extractfile || decomp) {
+					if (createfile) {
 						printUsage();
 						return(EINVAL);
 					}
 					printDir = TRUE;
 					break;
-				case 'L':
-					if (createfile || extractfile || decomp) {
-						printUsage();
-						return(EINVAL);
-					}
-					allowLargeBlocks = TRUE;
-					break;
 				case 'v':
 					printVerbose++;
 					break;
-				case 'd':
-					if (printDir || applycomp || hardLinkCheck) {
-						printUsage();
-						return(EINVAL);
-					}
-					decomp = TRUE;
-					break;
-				case 'a':
-					if (printDir || extractfile || applycomp || hardLinkCheck) {
-						printUsage();
-						return(EINVAL);
-					}
-					createfile = TRUE;
-					break;
-				case 'x':
-					if (printDir || createfile || applycomp || hardLinkCheck) {
-						printUsage();
-						return(EINVAL);
-					}
-					extractfile = TRUE;
-					break;
 				case 'c':
-					if (createfile || extractfile || decomp) {
+					if (createfile) {
 						printUsage();
 						return(EINVAL);
 					}
 					applycomp = TRUE;
 					break;
-				case 'k':
-					// this flag is obsolete and no longer does anything, but it is kept here for backward compatibility with scripts that use it
-					break;
 				case 'n':
-					if (createfile || extractfile || decomp) {
+					if (createfile) {
 						printUsage();
 						return(EINVAL);
 					}
 					fileCheck = FALSE;
 					break;
 				case 'f':
-					if (createfile || extractfile || decomp) {
+					if (createfile) {
 						printUsage();
 						return(EINVAL);
 					}
 					hardLinkCheck = TRUE;
 					break;
-				case '1':
-				case '2':
-				case '3':
-				case '4':
-				case '5':
-				case '6':
-				case '7':
-				case '8':
-				case '9':
-					if (createfile || extractfile || decomp) {
-						printUsage();
-						return(EINVAL);
-					}
-					compressionlevel = argv[i][j] - '0';
-					break;
 				case 'm':
-					if (createfile || extractfile || decomp || j + 1 < strlen(argv[i]) || i + 2 > argc) {
+					if (createfile || j + 1 < strlen(argv[i]) || i + 2 > argc) {
 						printUsage();
 						return(EINVAL);
 					}
 					i++;
 					sscanf(argv[i], "%lld", &maxSize);
-					j = strlen(argv[i]) - 1;
-					break;
-				case 's':
-					if (createfile || extractfile || decomp || j + 1 < strlen(argv[i]) || i + 2 > argc) {
-						printUsage();
-						return(EINVAL);
-					}
-					i++;
-					sscanf(argv[i], "%lf", &minSavings);
-					if (minSavings > 99 || minSavings < 0) {
-						fprintf(stderr, "Invalid minimum savings percentage; must be a number from 0 to 99\n");
-						return(EINVAL);
-					}
 					j = strlen(argv[i]) - 1;
 					break;
 				case 'T':
@@ -1275,7 +1216,7 @@ next_arg:
 		;
 	}
 
-	if (i == argc || ((createfile || extractfile) && (argc - i < 2))) {
+	if (i == argc || ((createfile) && (argc - i < 2))) {
 		printUsage();
 		return(EINVAL);
 	}
@@ -1310,7 +1251,7 @@ next_arg:
 	signal(SIGXFSZ, SIG_IGN);
 
 	int N, step, n;
-	if (createfile || extractfile) {
+	if (createfile) {
 		N = argc - 1;
 		step = 2;
 	} else {
@@ -1321,7 +1262,7 @@ next_arg:
 		if (n && printVerbose > 0 && !nJobs) {
 			printf("\n");
 		}
-		if (createfile || extractfile) {
+		if (createfile) {
 			if (argv[i + 1][0] != '/') {
 				cwd = getcwd(NULL, 0);
 				if (cwd == NULL) {
@@ -1363,7 +1304,7 @@ next_arg:
 			folderarray[1] = NULL;
 		}
 
-		if ((createfile || extractfile) && lstat(fullpathdst, &dstfileinfo) >= 0) {
+		if (createfile && lstat(fullpathdst, &dstfileinfo) >= 0) {
 			dstIsFile = ((dstfileinfo.st_mode & S_IFDIR) == 0);
 			fprintf(stderr, "%s: %s already exists at this path\n", fullpath, dstIsFile ? "File" : "Folder");
 			continue;

@@ -365,7 +365,16 @@ static std::string makeAbsolute(const char *name)
 	return absName;
 }
 
-bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFileProcessor *PP = nullptr)
+// check if the given dataset doesn't already use the requested new compression 
+static bool compressionOk(const iZFSDataSetCompressionInfo *dataset, const struct folder_info *fi)
+{
+	auto info = dynamic_cast<const ZFSDataSetCompressionInfo*>(dataset);
+	return (info && fi)? info->initialCompression != *fi->z_compression : false;
+}
+
+bool fileIsCompressable(const char *inFile,
+						struct stat *inFileInfo, struct folder_info *folderInfo,
+						ParallelFileProcessor *PP = nullptr)
 {
 	struct statfs fsInfo;
 	errno = 0;
@@ -383,17 +392,18 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 	_isZFS = (fsInfo.f_type == S_MAGIC_ZFS);
 #endif
 	if (ret >= 0 && (S_ISREG(inFileInfo->st_mode) || S_ISLNK(inFileInfo->st_mode)) && _isZFS) {
-		if (PP && PP->z_dataSetForFile(inFile)) {
+		iZFSDataSetCompressionInfo *knownDataSet = nullptr;
+		if (PP && (knownDataSet = PP->z_dataSetForFile(inFile))) {
 			// file already has a dataset property: OK to compress
-			return true;
+			// if the dataset doesn't already have the requested compression set.
+			return compressionOk(knownDataSet, folderInfo);
 		} else {
-			iZFSDataSetCompressionInfo *knownDataSet = nullptr;
 			if (gZFSDataSetCompressionForFSId.count(fsId)) {
 				knownDataSet = gZFSDataSetCompressionForFSId[fsId];
 				if (PP) {
 					PP->z_addDataSet(inFile, knownDataSet);
 				}
-				return true;
+				return compressionOk(knownDataSet, folderInfo);
 			}
 			std::string fName;
 			if (S_ISLNK(inFileInfo->st_mode)) {
@@ -444,12 +454,13 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 						auto unknownDataSet = knownDataSet? knownDataSet : new ZFSDataSetCompressionInfo(properties);
 						PP->z_addDataSet(inFile, unknownDataSet);
 						gZFSDataSetCompressionForFSId[fsId] = unknownDataSet;
+						knownDataSet = unknownDataSet;
 					} else {
 						// I don't think this will ever happen so be sloppy until proof of the contrary
 						fprintf(stderr, "Warning: leaking dataset info for %s\n", inFile);
-						gZFSDataSetCompressionForFSId[fsId] = new ZFSDataSetCompressionInfo(properties);
+						gZFSDataSetCompressionForFSId[fsId] = knownDataSet = new ZFSDataSetCompressionInfo(properties);
 					}
-					retval = true;
+					retval = compressionOk(knownDataSet, folderInfo);
 				} else {
 					fprintf(stderr, "Skipping '%s' because '%s' parses to %lu items\n",
 							inFile, dataSetName.c_str(), properties.size());
@@ -506,7 +517,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	times[1].tv_usec = inFileInfo->st_mtim.tv_nsec / 1000;
 #endif
 
-	if (!fileIsCompressable(inFile, inFileInfo, worker? worker->controller() : nullptr)) {
+	if (!fileIsCompressable(inFile, inFileInfo, folderinfo, worker? worker->controller() : nullptr)) {
 		return;
 	}
 	if (filesize > maxSize && maxSize != 0) {
@@ -1066,7 +1077,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 				if (!folderinfo->check_hard_links || !checkForHardLink(currfile->fts_path, currfile->fts_statp, folderinfo)) {
 					if (folderinfo->compress_files && S_ISREG(currfile->fts_statp->st_mode)) {
 						if (PP) {
-							if (fileIsCompressable(currfile->fts_path, currfile->fts_statp, PP)) {
+							if (fileIsCompressable(currfile->fts_path, currfile->fts_statp, folderinfo, PP)) {
 								addFileToParallelProcessor(PP, currfile->fts_path, currfile->fts_statp, folderinfo, false);
 							} else {
 								process_file_info(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
@@ -1119,8 +1130,6 @@ int zfsctool(int argc, const char *argv[])
 	struct folder_info folderinfo;
 	FTS *currfolder;
 	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd;
-	int compressionlevel = 5;
-	compression_type compressiontype = ZLIB;
 	double minSavings = 0.0;
 	long long int maxSize = 0;
 	bool printDir = FALSE, createfile = FALSE, applycomp = FALSE,
@@ -1128,6 +1137,7 @@ int zfsctool(int argc, const char *argv[])
 		 allowLargeBlocks = FALSE, backupFile = FALSE;
 	int nJobs = 0, nReverse = 0;
 	bool sortQueue = false;
+	std::string codec = "test";
 
 	if (argc < 2) {
 		printUsage();
@@ -1187,12 +1197,11 @@ int zfsctool(int argc, const char *argv[])
 						return(EINVAL);
 					}
 					i++;
-					const char *comp = argv[i];
+					codec = argv[i];
 					std::set<std::string> compNames;
 					split(COMPRESSIONNAMES, compNames, '|');
-					std::cout << compNames << std::endl;
-					if (strcasecmp(comp, "test") == 0 /*|| compNames.contain(comp)*/) {
-					} else {
+					//std::cout << compNames << std::endl;
+					if (strcasecmp(argv[i], "test") && !compNames.count(codec)) {
 						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
 						printUsage();
 						return(EINVAL);
@@ -1347,14 +1356,13 @@ next_arg:
 		if (applycomp && argIsFile) {
 			struct folder_info fi;
 			fi.maxSize = maxSize;
-			fi.compressionlevel = compressionlevel;
-			fi.compressiontype = compressiontype;
+			fi.z_compression = &codec;
 			fi.allowLargeBlocks = allowLargeBlocks;
 			fi.minSavings = minSavings;
 			fi.check_files = fileCheck;
 			fi.backup_file = backupFile;
 			if (PP) {
-				if (fileIsCompressable(fullpath, &fileinfo, PP)) {
+				if (fileIsCompressable(fullpath, &fileinfo, &fi, PP)) {
 					addFileToParallelProcessor(PP, fullpath, &fileinfo, &fi, true);
 				} else {
 					process_file_info(fullpath, NULL, &fileinfo, getParallelProcessorJobInfo(PP));
@@ -1366,7 +1374,9 @@ next_arg:
 		}
 
 		if (argIsFile && printVerbose > 0) {
-			fileIsCompressable(fullpath, &fileinfo);
+			struct folder_info fi;
+			fi.z_compression = &codec;
+			fileIsCompressable(fullpath, &fileinfo, &fi);
 			printFileInfo(fullpath, &fileinfo);
 		} else if (!argIsFile) {
 			if ((currfolder = fts_open(folderarray, FTS_PHYSICAL, NULL)) == NULL) {
@@ -1390,8 +1400,7 @@ next_arg:
 			folderinfo.compress_files = applycomp;
 			folderinfo.check_files = fileCheck;
 			folderinfo.allowLargeBlocks = allowLargeBlocks;
-			folderinfo.compressionlevel = compressionlevel;
-			folderinfo.compressiontype = compressiontype;
+			folderinfo.z_compression = &codec;
 			folderinfo.minSavings = minSavings;
 			folderinfo.maxSize = maxSize;
 			folderinfo.check_hard_links = hardLinkCheck;
@@ -1551,10 +1560,10 @@ next_arg:
 			}
 			signal(SIGINT, signal_handler);
 			signal(SIGHUP, signal_handler);
-			fprintf(stderr, "Starting %d worker thread(s) to process queue with %lu item(s)\n",
-					nJobs, nFiles);
+			fprintf(stderr, "Starting %d worker thread(s) to (re)compress %lu file(s) with compression '%s'\n",
+					nJobs, nFiles, codec.c_str());
 			int processed = runParallelProcessor(PP);
-			fprintf(stderr, "Processed %d entries\n", processed);
+			fprintf(stderr, "Processed %d entries, applying new compression '%s'\n", processed, codec.c_str());
 			if (printVerbose > 0) {
 				struct folder_info *fInfo = getParallelProcessorJobInfo(PP);
 				if (fInfo->num_files > 0) {
@@ -1566,9 +1575,6 @@ next_arg:
 		}
 		releaseParallelProcessor(PP);
 	}
-// 	if (maxOutBufSize) {
-// 		fprintf(stderr, "maxOutBufSize: %zd\n", maxOutBufSize);
-// 	}
 	if (ipcPipes[0] != -1) {
 		close(ipcPipes[0]);
 	}

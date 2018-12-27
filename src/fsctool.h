@@ -77,9 +77,7 @@ public:
 		init(&src);
 	}
 	~folder_info()
-    {
-        delete z_compression;
-    }
+    {}
 private:
 	void init(const struct folder_info *src)
 	{

@@ -39,7 +39,7 @@
 #include "zfsctool.h"
 #include "utils.h"
 #include "ParallelProcess.h"
-#include "ParallelProcess_p.h"
+#include "ParallelProcess_p.hpp"
 
 #include <sstream>
 #include <algorithm>

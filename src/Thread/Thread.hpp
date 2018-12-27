@@ -1,6 +1,6 @@
 // kate: auto-insert-doxygen true; backspace-indents true; indent-width 5; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 5;
 /*!
-	@file Thread.h
+	@file Thread.hpp
 	A generic thread class inspired by Arun N Kumar's CThread
 	http://www.codeproject.com/Articles/1570/A-Generic-C-Thread-Class
 	reimplemented and extended by RJVB (C) 2012

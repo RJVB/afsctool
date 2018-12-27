@@ -3,7 +3,7 @@
  *  @file msemul.h
  *	emulation of multithreading related functions from MS Windows
  *
- *  Created by René J.V. Bertin on 20111204.
+ *  Created by RenÃ© J.V. Bertin on 20111204.
  *  Copyright 2011 RJVB. All rights reserved.
  *  This code is made available under No License At All
  */

@@ -1,7 +1,7 @@
 // kate: auto-insert-doxygen true; backspace-indents true; indent-width 4; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 4;
 
 /*
- * @file ParallelProcess_p.h
+ * @file ParallelProcess_p.hpp
  * Copyright 2015 René J.V. Bertin
  *  This code is made available under No License At All
  */
@@ -16,7 +16,7 @@
 #include <sparsehash/dense_hash_map>
 
 #undef MUTEXEX_CAN_TIMEOUT
-#include "Thread/Thread.h"
+#include "Thread/Thread.hpp"
 
 #define CRITSECTLOCK	MutexEx
 

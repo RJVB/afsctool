@@ -16,7 +16,7 @@
 
 #include <algorithm>
 
-#include "ParallelProcess_p.h"
+#include "ParallelProcess_p.hpp"
 #include "ParallelProcess.h"
 
 // ================================= FileEntry methods =================================

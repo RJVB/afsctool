@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <stddef.h>
 
-#include "Thread/Thread.h"
+#include "Thread/Thread.hpp"
 
 DWORD thread2ThreadKey = 0, thread2ThreadKeyClients = 0;
 

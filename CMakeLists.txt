@@ -67,6 +67,7 @@ endif()
 configure_file(afsctool_fullversion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/afsctool_fullversion.h)
 
 add_library(PP OBJECT
+    src/utils.cpp
     src/ParallelProcess.cpp
     src/Thread/Thread.cpp
     src/CritSectEx/CritSectEx.cpp

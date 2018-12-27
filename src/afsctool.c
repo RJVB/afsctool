@@ -59,6 +59,7 @@
 	static bool exclusive_io = true;
 #endif
 #include "afsctool_fullversion.h"
+#include "utils.h"
 
 #define xfree(x)		if((x)){free((x)); (x)=NULL;}
 #define xclose(x)		if((x)!=-1){close((x)); (x)=-1;}
@@ -1523,103 +1524,6 @@ bail:
 #else
 	// not much point doing a non-Apple implementation, even for testing
 #endif
-}
-
-bool checkForHardLink(const char *filepath, const struct stat *fileInfo, const struct folder_info *folderinfo)
-{
-	static ino_t *hardLinks = NULL;
-	static char **paths = NULL, *list_item;
-	static long int currSize = 0, numLinks = 0;
-	long int right_pos, left_pos = 0, curr_pos = 1;
-	
-	if (fileInfo != NULL && fileInfo->st_nlink > 1)
-	{
-		if (hardLinks == NULL)
-		{
-			currSize = 1;
-			hardLinks = (ino_t *) malloc(currSize * sizeof(ino_t));
-			if (hardLinks == NULL)
-			{
-				fprintf(stderr, "Malloc error allocating memory for list of file hard links, exiting...\n");
-				exit(ENOMEM);
-			}
-			paths = (char **) malloc(currSize * sizeof(char *));
-			if (paths == NULL)
-			{
-				fprintf(stderr, "Malloc error allocating memory for list of file hard links, exiting...\n");
-				exit(ENOMEM);
-			}
-		}
-		
-		if (numLinks > 0)
-		{
-			left_pos = 0;
-			right_pos = numLinks + 1;
-			
-			while (hardLinks[curr_pos-1] != fileInfo->st_ino)
-			{
-				curr_pos = (right_pos - left_pos) / 2;
-				if (curr_pos == 0) break;
-				curr_pos += left_pos;
-				if (hardLinks[curr_pos-1] > fileInfo->st_ino)
-					right_pos = curr_pos;
-				else if (hardLinks[curr_pos-1] < fileInfo->st_ino)
-					left_pos = curr_pos;
-			}
-			if (curr_pos != 0 && hardLinks[curr_pos-1] == fileInfo->st_ino)
-			{
-				if (strcmp(filepath, paths[curr_pos-1]) != 0 || strlen(filepath) != strlen(paths[curr_pos-1]))
-				{
-					if (folderinfo->print_info > 1)
-						printf("%s: skipping, hard link to this %s exists at %s\n", filepath, (fileInfo->st_mode & S_IFDIR) ? "folder" : "file", paths[curr_pos-1]);
-					return TRUE;
-				}
-				else
-					return FALSE;
-			}
-		}
-		if (currSize < numLinks + 1)
-		{
-			currSize *= 2;
-			hardLinks = (ino_t *) realloc(hardLinks, currSize * sizeof(ino_t));
-			if (hardLinks == NULL)
-			{
-				fprintf(stderr, "Malloc error allocating memory for list of file hard links, exiting...\n");
-				exit(ENOMEM);
-			}
-			paths = (char **) realloc(paths, currSize * sizeof(char *));
-			if (paths == NULL)
-			{
-				fprintf(stderr, "Malloc error allocating memory for list of file hard links, exiting...\n");
-				exit(ENOMEM);
-			}
-		}
-		if ((numLinks != 0) && ((numLinks - 1) >= left_pos))
-		{
-			memmove(&hardLinks[left_pos+1], &hardLinks[left_pos], (numLinks - left_pos) * sizeof(ino_t));
-			if (paths != NULL)
-				memmove(&paths[left_pos+1], &paths[left_pos], (numLinks - left_pos) * sizeof(char *));
-		}
-		hardLinks[left_pos] = fileInfo->st_ino;
-		list_item = (char *) malloc(strlen(filepath) + 1);
-		strcpy(list_item, filepath);
-		paths[left_pos] = list_item;
-		numLinks++;
-	}
-	else if (fileInfo == NULL && hardLinks != NULL)
-	{
-		free(hardLinks);
-		hardLinks = NULL;
-		currSize = 0;
-		numLinks = 0;
-		if (paths != NULL)
-		{
-			for (curr_pos = 0; curr_pos < numLinks; curr_pos++)
-				free(paths[curr_pos]);
-			free(paths);
-		}
-	}
-	return FALSE;
 }
 
 void add_extension_to_filetypeinfo(const char *filepath, struct filetype_info *filetypeinfo)

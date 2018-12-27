@@ -1120,7 +1120,7 @@ int zfsctool(int argc, const char *argv[])
 					codec = argv[i];
 					std::set<std::string> compNames;
 					split(COMPRESSIONNAMES, compNames, '|');
-					//std::cout << compNames << std::endl;
+					//std::cerr << compNames << std::endl;
 					if (strcasecmp(argv[i], "test") && !compNames.count(codec)) {
 						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
 						printUsage();
@@ -1304,6 +1304,9 @@ next_arg:
 //				exit(EACCES);
 				continue;
 			}
+			if (PP) {
+				struct folder_info *fi = getParallelProcessorJobInfo(PP);
+			}
 			folderinfo.uncompressed_size = 0;
 			folderinfo.uncompressed_size_rounded = 0;
 			folderinfo.compressed_size = 0;
@@ -1450,6 +1453,14 @@ next_arg:
 					if (printVerbose > 0) {
 						printFolderInfo(&folderinfo, hardLinkCheck);
 					}
+				} else if (PP) {
+					struct folder_info *fi = getParallelProcessorJobInfo(PP);
+					memcpy(fi, &folderinfo, sizeof(*fi));
+// 					reset certain fields
+					fi->num_files = 0;
+					fi->uncompressed_size = fi->uncompressed_size_rounded = 0;
+					fi->compressed_size = fi->compressed_size_rounded = 0;
+					fi->total_size = 0;
 				}
 			}
 		}

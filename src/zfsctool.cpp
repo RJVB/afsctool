@@ -44,7 +44,9 @@
 #include <algorithm>
 #include <iterator>
 #include <vector>
+#include <set>
 #include <atomic>
+#include <typeinfo>
 
 static ParallelFileProcessor *PP = NULL;
 static bool exclusive_io = true;
@@ -68,8 +70,7 @@ const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 102
 										   };
 
 int printVerbose = 0;
-static size_t maxOutBufSize = 0;
-void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp);
+void printFileInfo(const char *filepath, struct stat *fileinfo);
 
 #if !__has_builtin(__builtin_available)
 #	warning "Please use clang 5 or newer if you can"
@@ -195,7 +196,7 @@ public:
 	}
 
 protected:
-	DWORD Run(LPVOID arg)
+	DWORD Run(LPVOID)
 	{
 		CRITSECTLOCK::Scope lock(critsect);
 		buf = new char[bufLen];
@@ -315,6 +316,26 @@ void split(const std::string &str, Container &cont, char delim='\t')
     }
 }
 
+template <typename T>
+void split(const std::string &str, std::set<T> &cont, char delim='\t')
+{
+    std::stringstream ss(str);
+    std::string token;
+    while (std::getline(ss, token, delim)) {
+        cont.insert(token);
+    }
+}
+
+// https://stackoverflow.com/questions/28803252/c-printing-or-cout-a-standard-library-container-to-console
+template <class container>
+std::ostream& operator<<(std::ostream& os, const container& c)
+{
+    std::copy(c.begin(),
+              c.end(),
+              std::ostream_iterator<typename container::value_type>(os, " "));
+    return os;
+}
+
 typedef uint64_t FSId_t;
 static google::dense_hash_map<FSId_t,iZFSDataSetCompressionInfo*> gZFSDataSetCompressionForFSId;
 #if defined(linux)
@@ -361,9 +382,6 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, ParallelFil
 #	endif
 	_isZFS = (fsInfo.f_type == S_MAGIC_ZFS);
 #endif
-	// TODO
-	// this function needs to call `zfs list $inFile` to see if the file is on a ZFS dataset
-	// if the same info isn't available via fsInfo.
 	if (ret >= 0 && (S_ISREG(inFileInfo->st_mode) || S_ISLNK(inFileInfo->st_mode)) && _isZFS) {
 		if (PP && PP->z_dataSetForFile(inFile)) {
 			// file already has a dataset property: OK to compress
@@ -457,16 +475,6 @@ static const char *lbasename(const char *url)
 		}
 	}
 	return c;
-}
-
-const char *compressionTypeName(int type)
-{
-	char *name = (char*) "";
-#ifndef STR
-#define STR(v)		#v
-#endif
-#define STRVAL(v)	STR(v)
-	return name;
 }
 
 void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_info *folderinfo, FileProcessor *worker)
@@ -948,7 +956,7 @@ struct filetype_info *getFileTypeInfo(const char *filepath, const char *filetype
 }
 #endif //0
 
-void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp)
+void printFileInfo(const char *filepath, struct stat *fileinfo)
 {
 	long long int filesize, filesize_rounded;
 
@@ -1081,6 +1089,8 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 	fts_close(currfolder);
 }
 
+#define COMPRESSIONNAMES "on|off|gzip|gzip-1|gzip-2|gzip-3|gzip-4|gzip-5|gzip-6|gzip-7|gzip-8|gzip-9|lz4|lzjb|zle"
+
 void printUsage()
 {
 	printf("zfsctool %s\n"
@@ -1097,7 +1107,9 @@ void printUsage()
 	   "-JN read, compress and write files (only compressable ones) using <N> threads (everything is concurrent)\n"
 	   "-S sort the item list by file size (leaving the largest files to the end may be beneficial if the target volume is almost full)\n"
 	   "-RM <M> of the <N> workers will work the item list (must be sorted!) in reverse order, starting with the largest files\n"
-	   "-T <compressor> Compression type to use, chosen from the supported ZFS compression types\n"
+	   "-T <compression> Compression codec to use, chosen from the supported ZFS compression types:\n"
+	   "                 " COMPRESSIONNAMES "\n"
+	   "                 or 'test' to perform a dry-run.\n"
 	   , AFSCTOOL_FULL_VERSION_STRING);
 }
 
@@ -1177,7 +1189,11 @@ int zfsctool(int argc, const char *argv[])
 					}
 					i++;
 					const char *comp = argv[i];
-					{
+					std::set<std::string> compNames;
+					split(COMPRESSIONNAMES, compNames, '|');
+					std::cout << compNames << std::endl;
+					if (strcasecmp(comp, "test") == 0 /*|| compNames.contain(comp)*/) {
+					} else {
 						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
 						printUsage();
 						return(EINVAL);
@@ -1352,7 +1368,7 @@ next_arg:
 
 		if (argIsFile && printVerbose > 0) {
 			fileIsCompressable(fullpath, &fileinfo);
-			printFileInfo(fullpath, &fileinfo, applycomp);
+			printFileInfo(fullpath, &fileinfo);
 		} else if (!argIsFile) {
 			if ((currfolder = fts_open(folderarray, FTS_PHYSICAL, NULL)) == NULL) {
 				fprintf(stderr, "%s: %s\n", fullpath, strerror(errno));

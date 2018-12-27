@@ -1099,7 +1099,6 @@ void printUsage()
 	   "-v Increase verbosity level\n"
 	   "-f Detect hard links\n"
 	   "-l List files which fail to compress\n"
-	   "-L Allow larger-than-raw compressed chunks (not recommended; always true for LZVN compression)\n"
 	   "-n Do not verify files after compression (not recommended)\n"
 	   "-m <size> Largest file size to compress, in bytes\n"
 	   "-b make a backup of files before compressing them\n"

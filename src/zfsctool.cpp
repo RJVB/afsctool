@@ -170,7 +170,7 @@ static bool quitRequested = FALSE;
 
 static void signal_handler(int sig)
 {
-	fprintf(stderr, "Received signal %d: zfsctool will quit\n", sig);
+	fprintf(stderr, "Received signal %d: zfsctool will quit (please be patient!)\n", sig);
 	stopParallelProcessor(PP);
 }
 
@@ -243,6 +243,10 @@ public:
 		// do something relevant here.
 		_setCompression(initialCompression);
 		delete critsect;
+		if (shuntedDecreases || shuntedIncreases) {
+			fprintf(stderr, "%s: void calls of setCompression() and resetCompression(): %d vs. %d\n",
+					c_str(), int(shuntedIncreases), int(shuntedDecreases));
+		}
 	}
 
 	// set a new dataset compression. The compresFile() function
@@ -259,7 +263,15 @@ public:
 		// to simplify the reset logic. We do this non-atomically because
 		// we're already protected by the locked critical section.
 		refcount += 1;
-		return _setCompression(newComp);
+		bool ret = _setCompression(newComp);
+		if (!ret) {
+			shuntedIncreases += 1;
+		}
+		return ret;
+	}
+	bool setCompression(const std::string *newComp)
+	{
+		return setCompression(*newComp);
 	}
 	bool setCompression(const char *compression)
 	{
@@ -269,24 +281,45 @@ public:
 	bool resetCompression()
 	{
 		bool retval = false;
-		if (refcount.fetch_sub(1) == 0) {
+		if (refcount.fetch_sub(1) == 1) {
 			CRITSECTLOCK::Scope lock(critsect);
 			retval = _setCompression(initialCompression);
+		} else {
+			shuntedDecreases.fetch_add(1);
 		}
 		return retval;
 	}
 
 	std::string initialCompression, currentCompression;
-	// we'll probably need something like a semaphore to keep track when the compression can be reset
-	// (= when no more workers are rewriting files on the dataset)
 
+// 	template <typename CharT, typename Traits>
+// 	friend std::basic_ostream<CharT, Traits> &operator <<(std::basic_ostream <CharT, Traits> &os, const ZFSDataSetCompressionInfo &x)
+// 	{
+// 		if (os.good()) {
+// 			typename std::basic_ostream <CharT, Traits>::sentry opfx(os);
+// 			if (opfx) {
+// 				std::basic_ostringstream<CharT, Traits> s;
+// 				s.flags(os.flags());
+// 				s.imbue(os.getloc());
+// 				s.precision(os.precision());
+// 				s << "[dataset '" << x << "' with original compression " << x.initialCompression
+// 					<< "and current compression " << x.currentCompression << "]";
+// 				if (s.fail()) {
+// 					os.setstate(std::ios_base::failbit);
+// 				} else {
+// 					os << s.str();
+// 				}
+// 			}
+// 		}
+// 		return os;
+// 	};
 protected:
 	bool _setCompression(const std::string &newComp)
 	{
 		bool ret = false;
 		if (currentCompression != newComp) {
 			const std::string command = "zfs set compression=" + newComp + " \"" + *this + "\"";
-			fprintf(stderr, "%s\n", command.c_str());
+			fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
 			// do something like
 // 			auto worker = ZFSCommandEngine(command);
 // 			if (worker.Start() == 0) {
@@ -303,7 +336,7 @@ protected:
 	}
 
 	CRITSECTLOCK *critsect = nullptr;
-	std::atomic_int refcount;
+	std::atomic_int refcount, shuntedIncreases, shuntedDecreases;
 };
 
 // from http://www.martinbroadhurst.com/how-to-split-a-string-in-c.html:
@@ -401,7 +434,7 @@ static bool compressionOk(const iZFSDataSetCompressionInfo *dataset, const struc
 	return (info && fi)? info->initialCompression != *fi->z_compression : false;
 }
 
-bool fileIsCompressable(const char *inFile,
+static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 						struct stat *inFileInfo, struct folder_info *folderInfo,
 						ParallelFileProcessor *PP = nullptr)
 {
@@ -420,21 +453,23 @@ bool fileIsCompressable(const char *inFile,
 #	endif
 	_isZFS = (fsInfo.f_type == S_MAGIC_ZFS);
 #endif
+	iZFSDataSetCompressionInfo *knownDataSet = nullptr;
 	if (ret >= 0
 			&& _isZFS
 			&& (S_ISREG(inFileInfo->st_mode) || (folderInfo->follow_sym_links && S_ISLNK(inFileInfo->st_mode)))) {
-		iZFSDataSetCompressionInfo *knownDataSet = nullptr;
 		if (PP && (knownDataSet = PP->z_dataSetForFile(inFile))) {
 			// file already has a dataset property: OK to compress
 			// if the dataset doesn't already have the requested compression set.
-			return compressionOk(knownDataSet, folderInfo);
+			return compressionOk(knownDataSet, folderInfo) ?
+				dynamic_cast<ZFSDataSetCompressionInfo*>(knownDataSet) : nullptr;
 		} else {
 			if (gZFSDataSetCompressionForFSId.count(fsId)) {
 				knownDataSet = gZFSDataSetCompressionForFSId[fsId];
 				if (PP) {
 					PP->z_addDataSet(inFile, knownDataSet);
 				}
-				return compressionOk(knownDataSet, folderInfo);
+				return compressionOk(knownDataSet, folderInfo) ?
+					dynamic_cast<ZFSDataSetCompressionInfo*>(knownDataSet) : nullptr;
 			}
 			std::string fName;
 			if (S_ISLNK(inFileInfo->st_mode)) {
@@ -442,7 +477,7 @@ bool fileIsCompressable(const char *inFile,
 				if (fName.empty()) {
 					fprintf(stderr, "skipping link '%s' because cannot determine its target (%s)\n",
 							inFile, strerror(errno));
-					return false;
+					return nullptr;
 				}
 // 				fprintf(stderr, "%s: compressing target '%s'\n",
 // 						inFile, fName.c_str());
@@ -451,7 +486,7 @@ bool fileIsCompressable(const char *inFile,
 				if (fName.empty()) {
 					fprintf(stderr, "skipping '%s' because cannot determine $PWD (%s)\n",
 							inFile, strerror(errno));
-					return false;
+					return nullptr;
 				}
 			} else {
 				fName = inFile;
@@ -501,7 +536,7 @@ bool fileIsCompressable(const char *inFile,
 			}
 		}
 	}
-	return retval;
+	return retval ? dynamic_cast<ZFSDataSetCompressionInfo*>(knownDataSet) : nullptr;
 }
 
 /*! Mac OS X basename() can modify the input string when not in 'legacy' mode on 10.6
@@ -550,9 +585,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	times[1].tv_usec = inFileInfo->st_mtim.tv_nsec / 1000;
 #endif
 
-	if (!fileIsCompressable(inFile, inFileInfo, folderinfo, worker? worker->controller() : nullptr)) {
+	ZFSDataSetCompressionInfo *dataset = fileIsCompressable(inFile, inFileInfo, folderinfo,
+															worker? worker->controller() : nullptr);
+	if (!dataset) {
 		return;
 	}
+
 	if (filesize > maxSize && maxSize != 0) {
 		if (folderinfo->print_info > 2) {
 			fprintf(stderr, "Skipping file %s size %lld > max size %lld\n", inFile, filesize, maxSize);
@@ -582,7 +620,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 #endif
 
 	bool locked = false;
-	// use open() with an exclusive lock so noone can modify the file while we're at it
+	// use open() with an exclusive lock so no one can modify the file while we're at it
 #ifdef WE_ARE_FUNCTIONAL
 	int fdIn = open(inFile, O_RDWR | O_EXLOCK);
 #else
@@ -669,6 +707,10 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		locked = worker->lockScope();
 	}
 
+	// just-in-time change of the dataset compression
+	// (or none at all if already changed and not reset)
+	dataset->setCompression(folderinfo->z_compression);
+
 #ifdef WE_ARE_FUNCTIONAL
 	// fdIn is still open
 	ftruncate(fdIn, 0);
@@ -685,7 +727,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 #endif
 
-// 	fsync(fdIn);
+	fsync(fdIn);
 	xclose(fdIn);
 	if (checkFiles) {
 		lstat(inFile, inFileInfo);
@@ -730,7 +772,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 					sizeMismatch, checkRead, readFailure, contentMismatch, strerror(errno));
 fail:
 			;
-			printf("%s: Compressed file check failed, reverting file changes\n", inFile);
+			printf("%s: Compressed file check failed, trying to rewrite a second time\n", inFile);
 			if (outBufMMapped) {
 				xmunmap(outBuf, filesize);
 			}
@@ -754,6 +796,10 @@ fail:
 			xmunmap(outBuf, filesize);
 		}
 	}
+
+	// reset the dataset compression (if no other rewrites are ongoing)
+	dataset->resetCompression();
+
 // #ifndef NO_USE_MMAP
 // 	{
 // 		char *tFileName = NULL;
@@ -1211,6 +1257,13 @@ next_arg:
 
 	gZFSDataSetCompressionForFSId.set_empty_key(0);
 	gZFSDataSetCompressionForFSId.clear();
+
+	if (backupFile) {
+		if (nJobs) {
+			fprintf(stderr, "Warning: using backup files imposes single-threaded processing!\n");
+		}
+		nJobs = 0;
+	}
 
 	if (nJobs > 0) {
 		if (nReverse && !sortQueue) {

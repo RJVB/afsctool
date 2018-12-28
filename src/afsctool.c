@@ -2917,6 +2917,7 @@ next_arg:;
 						}
 						free(attr_buf);
 					}
+					// unreachable
 					fprintf(stderr, "%s: Error reading file\n", fullpath);
 					return -1;
 				decomp_check:

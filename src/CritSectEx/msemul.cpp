@@ -19,11 +19,14 @@
 #endif
 #include <sstream>
 
+#include <mutex>
+
 #include "msemul.h"
 
 #if defined(__APPLE__) || defined(__MACH__)
 #	include <mach/thread_act.h>
 #	include <dlfcn.h>
+#	include <AvailabilityMacros.h>
 #endif
 
 #include "CritSectEx.h"
@@ -1112,12 +1115,14 @@ static void *timedThreadStartRoutine( void *args )
   int old;
   void *status;
 #if defined(__MACH__) || defined(__APPLE_CC__)
+#if MAC_OS_X_VERSION_MIN_REQUIRED <= MAC_OS_X_VERSION_10_6
 	// Register thread with Garbage Collector on Mac OS X if we're running an OS version that has GC
   void (*registerThreadWithCollector_fn)(void);
 	registerThreadWithCollector_fn = (void(*)(void)) dlsym(RTLD_NEXT, "objc_registerThreadWithCollector");
 	if( registerThreadWithCollector_fn ){
 		(*registerThreadWithCollector_fn)();
 	}
+#endif // VERSION
 #endif
 	pthread_once( &timedThreadCreated, timed_thread_init );
 	pthread_setspecific( timedThreadKey, (void*) tt );
@@ -1318,6 +1323,8 @@ int pthread_create_suspendable( HANDLE mshThread, const pthread_attr_t *attr,
 
 #endif // !__APPLE__ && !__MACH__
 
+static std::mutex gThreadStartMutex;
+
 MSHANDLE::MSHANDLE( void *ign_lpThreadAttributes, size_t ign_dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress,
 	    void *lpParameter, DWORD dwCreationFlags, DWORD *lpThreadId )
 { void* (*start_routine)(void*) = (void* (*)(void*)) lpStartAddress;
@@ -1326,6 +1333,8 @@ MSHANDLE::MSHANDLE( void *ign_lpThreadAttributes, size_t ign_dwStackSize, LPTHRE
 		type = MSH_EMPTY;
 		return;
 	}
+	// create the new thread, one at a time
+	{ std::lock_guard<std::mutex> guard(gThreadStartMutex);
 #if defined(__APPLE__) || defined(__MACH__)
 	if( (dwCreationFlags & CREATE_SUSPENDED) ){
 		if( !pthread_create_suspended_np( &d.t.theThread->thread, NULL, timedThreadStartRoutine, d.t.theThread ) ){
@@ -1362,6 +1371,7 @@ MSHANDLE::MSHANDLE( void *ign_lpThreadAttributes, size_t ign_dwStackSize, LPTHRE
 		}
 	}
 #endif // !__APPLE__ && !__MACH__
+	} // end guarded
 	if( d.t.pThread ){
 		type = MSH_THREAD;
 		d.t.threadId = NextThreadID();

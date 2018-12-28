@@ -310,7 +310,7 @@ class Thread {
 			pParent->CleanupThread();
 
 			return (THREAD_RETURN) pParent->m_ThreadCtx.m_dwExitCode;
-			// why on earth would we wqnt to return STILL_ACTIVE when we exit???
+			// why on earth would we want to return STILL_ACTIVE when we exit???
 			// return (THREAD_RETURN) STILL_ACTIVE;
 		}
 

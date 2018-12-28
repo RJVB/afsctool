@@ -72,7 +72,7 @@ const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 102
 											(long long int) 1024 * 1024 * 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024 * 1024 * 1024
 										   };
 
-int printVerbose = 0;
+static int printVerbose = 0;
 void printFileInfo(const char *filepath, struct stat *fileinfo);
 
 #if !__has_builtin(__builtin_available)
@@ -81,8 +81,10 @@ void printFileInfo(const char *filepath, struct stat *fileinfo);
 static int darwinMajor = 0;
 #endif
 
-int ipcPipes[2] = {-1, -1};
-char ipcPipeWriteEnd[64];
+static int ipcPipes[2] = {-1, -1};
+static char ipcPipeWriteEnd[64];
+
+static bool quickCompressionReset = true;
 
 char *getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 {
@@ -181,7 +183,9 @@ class ZFSCommandEngine : public Thread
 public:
 	ZFSCommandEngine(std::string command, bool wantOutput=true, size_t outputLen=256)
 		: theCommand(command)
+		, buf(nullptr)
 		, bufLen(outputLen)
+		, readlen(-1)
 		, wantOutput(wantOutput)
 	{}
 	~ZFSCommandEngine()
@@ -202,12 +206,11 @@ public:
 protected:
 	void InitThread()
 	{
-		const char *name = "zfs command";
 #ifdef __MACH__
-		pthread_setname_np(name);
+		pthread_setname_np(theCommand.c_str());
 #else
 		pthread_t thread = (pthread_t) GetThreadId(GetThread());
-		pthread_setname_np(thread, name);
+		pthread_setname_np(thread, theCommand.c_str());
 #endif
 	}
 
@@ -240,12 +243,13 @@ protected:
 			// the child can close this one now too
 			close(ipcPipes[1]);
 			execlp("sh", "sh", "-e", "-c", theCommand.c_str(), nullptr);
+			// this will go into the ipcPipe:
 			fprintf(stderr, "Failed to execute `%s` (%s)\n", theCommand.c_str(), strerror(errno));
 // 			execlp("sudo", "sudo", "-s", theCommand.c_str(), nullptr);
 // 			fprintf(stderr, "Failed to execute `sudo -s %s` (%s)\n", theCommand.c_str(), strerror(errno));
 			_exit(127);
 		} else {
-			if (errno!=0) {
+			if (errno != 0) {
 				fprintf(stderr, "fork set error %s\n", strerror(errno));
 			}
 			int wp;
@@ -274,9 +278,9 @@ protected:
 
 	std::string theCommand;
 	static CRITSECTLOCK critsect;
-	char *buf = nullptr;
+	char *buf ;
 	size_t bufLen;
-	int readlen = -1;
+	int readlen;
 	bool wantOutput;
 public:
 	int error;
@@ -292,6 +296,8 @@ public:
 		, currentCompression(compression)
 		, critsect(new CRITSECTLOCK(4000))
 		, refcount(0)
+		, shuntedIncreases(0)
+		, shuntedDecreases(0)
 	{
 		fprintf(stderr, "dataset '%s' has compression '%s'\n",
 				name, compression);
@@ -303,7 +309,7 @@ public:
 	virtual ~ZFSDataSetCompressionInfo()
 	{
 		// do something relevant here.
-		_setCompression(initialCompression);
+		_setCompression(initialCompression, true);
 		delete critsect;
 		if (shuntedDecreases || shuntedIncreases) {
 			fprintf(stderr, "%s: void calls of setCompression() and resetCompression(): %d vs. %d\n",
@@ -376,29 +382,40 @@ public:
 // 		return os;
 // 	};
 protected:
-	bool _setCompression(const std::string &newComp)
+	bool _setCompression(const std::string &newComp, bool verbose=false)
 	{
 		bool ret = false;
 		if (currentCompression != newComp) {
 			const std::string command = std::string(newComp == "test" ? "echo zfs" : "zfs")
 				+ " set compression=" + newComp + " \"" + *this + "\"";
-// 				+ " get compression" + " \"" + *this + "\"";
-// 			fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
-			auto worker = ZFSCommandEngine(command, false);
-			if (worker.Start() == 0) {
-				int waitval = worker.Join();
-				DWORD exitval = DWORD(worker.GetExitCode());
-				if (waitval || exitval) {
-					fprintf(stderr, "Error: `%s`\n\t%s exit code %lu error \"%s\" (refcount=%d)\n",
-							command.c_str(),
-							worker.getOutput().c_str(), exitval, strerror(worker.error), int(refcount));
-				} else if (newComp == "test" && worker.getOutput().size() > 0) {
-					fprintf(stderr, "test: %s\n", worker.getOutput().c_str());
-				}
+			if (verbose) {
+				fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
 			}
-			// on success:
-			currentCompression = newComp;
-			ret = true;
+			// use 'new' because automatic instances tend to get the same address
+			// which feels "wrong" in this context.
+			auto worker = new ZFSCommandEngine(command, false);
+			auto startval = worker->Start();
+			if (startval == 0 || worker->isStarted()) {
+				int waitval = worker->Join();
+				DWORD exitval = DWORD(worker->GetExitCode());
+				if (waitval || exitval || verbose) {
+					fprintf(stderr, "`%s`\n\t%s exit code %lu error \"%s\" (refcount=%d)\n",
+							command.c_str(),
+							worker->getOutput().c_str(), exitval, strerror(worker->error), int(refcount));
+				} else if (newComp == "test" && worker->getOutput().size() > 0) {
+					fprintf(stderr, "test: %s\n", worker->getOutput().c_str());
+				}
+				if (exitval == 0) {
+					// on success:
+					currentCompression = newComp;
+					ret = true;
+				}
+			} else {
+				fprintf(stderr, "`%s` failed to start (%d; %s)\n",
+						command.c_str(), startval, strerror(errno));
+				worker->Join(1000);
+			}
+			delete worker;
 		}
 		return ret;
 	}
@@ -460,6 +477,12 @@ static google::dense_hash_map<FSId_t,iZFSDataSetCompressionInfo*> gZFSDataSetCom
 static void EmptyFSIdMap()
 {
 	for (auto entry : gZFSDataSetCompressionForFSId) {
+		// do the compression reset here instead of through the PP dtor
+		if (!quickCompressionReset) {
+			if (auto dataset = dynamic_cast<ZFSDataSetCompressionInfo*>(entry.second)) {
+				dataset->setCompression(dataset->initialCompression);
+			}
+		}
 		if (!entry.second->autoDelete()) {
 // 			std::cerr << "Deleting gZFSDataSetCompressionForFSId entry {"
 // 				<< entry.first << "," << *entry.second
@@ -563,13 +586,14 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 			// current zfs driver command will return a name if the path begins with a
 			// valid dataset mountpoint, or else return an error;
 			std::string dataSetName;
-			auto worker = ZFSCommandEngine("zfs list -H -o name,compression \"" + fName + "\"", MAXPATHLEN);
-			if (worker.Start() == 0) {
-				if (int exitval = worker.Join()) {
-					fprintf(stderr, "\t`%s` returned %d (%s)\n", worker.command().c_str(), exitval, strerror(worker.error));
+			// use 'new' here too.
+			auto worker = new ZFSCommandEngine("zfs list -H -o name,compression \"" + fName + "\"", MAXPATHLEN);
+			if (worker->Start() == 0 || worker->isStarted()) {
+				if (int exitval = worker->Join()) {
+					fprintf(stderr, "\t`%s` returned %d (%s)\n", worker->command().c_str(), exitval, strerror(worker->error));
 				} else {
-					if (worker.getOutput().size() > 0) {
-						dataSetName = worker.getOutput();
+					if (worker->getOutput().size() > 0) {
+						dataSetName = worker->getOutput();
 					} else {
 						// terse error because pclose() will probably generate an error
 						fprintf(stderr, "Skipping '%s' because cannot obtain its dataset name\n", inFile);
@@ -577,8 +601,10 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 				}
 			} else {
 				fprintf(stderr, "Skipping '%s' because cannot obtain its dataset name; `%s` failed to start (%s)\n",
-						inFile, worker.command().c_str(), strerror(errno));
+						inFile, worker->command().c_str(), strerror(errno));
+				worker->Join(1000);
 			}
+			delete worker;
 			if (!dataSetName.empty()) {
 				// dataSetName will now contain something like "name\tcompression";
 				// split that:
@@ -866,7 +892,9 @@ fail:
 	}
 
 	// reset the dataset compression (if no other rewrites are ongoing)
-	dataset->resetCompression();
+	if (quickCompressionReset) {
+		dataset->resetCompression();
+	}
 
 // #ifndef NO_USE_MMAP
 // 	{
@@ -1170,7 +1198,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 void printUsage()
 {
 	printf("zfsctool %s\n"
-	   "Apply compression to file or folder: zfsctool -c[nlfFvv[v]b] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-T compressor] file[s]/folder[s]\n\n"
+	   "Apply compression to file or folder: zfsctool -c[nlfFvv[v]b] [-q] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-T compressor] file[s]/folder[s]\n\n"
 	   "Options:\n"
 	   "-v Increase verbosity level\n"
 	   "-f Detect hard links\n"
@@ -1186,20 +1214,22 @@ void printUsage()
 	   "-T <compression> Compression codec to use, chosen from the supported ZFS compression types:\n"
 	   "                 " COMPRESSIONNAMES "\n"
 	   "                 or 'test' to perform a dry-run.\n"
+	   "-1 quick(er): reset the original dataset compression properties at the end instead of ASAP.\n"
+	   "   This increases the chance that other files are written with the new compression.\n"
 	   , AFSCTOOL_FULL_VERSION_STRING);
 }
 
 int zfsctool(int argc, const char *argv[])
 {
 	int i, j;
-	struct stat fileinfo, dstfileinfo;
+	struct stat fileinfo;
 	struct folder_info folderinfo;
 	FTS *currfolder;
 	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd;
 	double minSavings = 0.0;
 	long long int maxSize = 0;
 	bool printDir = FALSE, applycomp = FALSE,
-		 fileCheck = TRUE, argIsFile, hardLinkCheck = FALSE, dstIsFile, free_src = FALSE, free_dst = FALSE,
+		 fileCheck = TRUE, argIsFile, hardLinkCheck = FALSE, free_src = FALSE, free_dst = FALSE,
 		 backupFile = FALSE, follow_sym_links = FALSE;
 	int nJobs = 0, nReverse = 0;
 	bool sortQueue = false;
@@ -1303,6 +1333,15 @@ int zfsctool(int argc, const char *argv[])
 						return(EINVAL);
 					}
 					sortQueue = true;
+					goto next_arg;
+					break;
+				case 'q':
+					if (!applycomp) {
+						printUsage();
+						return(EINVAL);
+					}
+					// sic:
+					quickCompressionReset = false;
 					goto next_arg;
 					break;
 				default:

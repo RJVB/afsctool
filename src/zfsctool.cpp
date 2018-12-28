@@ -35,6 +35,8 @@
 #define O_EXLOCK 0
 #define MAP_NOCACHE 0
 #endif
+#include <sys/wait.h>
+#include <poll.h>
 
 #include "zfsctool.h"
 #include "utils.h"
@@ -177,8 +179,9 @@ static void signal_handler(int sig)
 class ZFSCommandEngine : public Thread
 {
 public:
-	ZFSCommandEngine(std::string command, size_t outputLen=256)
+	ZFSCommandEngine(std::string command, bool wantOutput=true, size_t outputLen=256)
 		: theCommand(command)
+		, wantOutput(wantOutput)
 		, bufLen(outputLen)
 	{}
 	~ZFSCommandEngine()
@@ -197,25 +200,90 @@ public:
 	}
 
 protected:
+	void InitThread()
+	{
+		const char *name = "zfs command";
+#ifdef __MACH__
+		pthread_setname_np(name);
+#else
+		pthread_t thread = (pthread_t) GetThreadId(GetThread());
+		pthread_setname_np(thread, name);
+#endif
+	}
+
 	DWORD Run(LPVOID)
 	{
 		CRITSECTLOCK::Scope lock(critsect);
 		buf = new char[bufLen];
-		std::string c = theCommand + " 1>&" + ipcPipeWriteEnd + " 2>&1 &";
-		int ret = system(c.c_str());
-		readlen = ret == 0? read(ipcPipes[0], buf, bufLen) : -1;
-		if (readlen > 1 && buf[readlen-1] == '\n') {
-			buf[readlen-1] = '\0';
-			readlen -= 1;
+		pid_t child;
+		int ret = -1;
+		errno = 0;
+		readlen = -1;
+		if ((child = fork()) < 0) {
+			// try the blunt way
+			std::string c = theCommand + " 1>&" + ipcPipeWriteEnd + " 2>&1 &";
+			ret = system(c.c_str());
+			if (ret == 0) {
+				getOutput(buf, bufLen);
+			}
+			error = errno;
+		} else if (child == 0) {
+			// child process; spawn the zfs command
+			// close the child's copy of the read end of the ipcPipe
+			close(ipcPipes[0]);
+			if (ipcPipes[1] != STDOUT_FILENO) {
+				dup2(ipcPipes[1], STDOUT_FILENO);
+			}
+			if (ipcPipes[1] != STDERR_FILENO) {
+				dup2(STDOUT_FILENO, STDERR_FILENO);
+			}
+			// the child can close this one now too
+			close(ipcPipes[1]);
+			execlp("sh", "sh", "-e", "-c", theCommand.c_str(), nullptr);
+			fprintf(stderr, "Failed to execute `%s` (%s)\n", theCommand.c_str(), strerror(errno));
+// 			execlp("sudo", "sudo", "-s", theCommand.c_str(), nullptr);
+// 			fprintf(stderr, "Failed to execute `sudo -s %s` (%s)\n", theCommand.c_str(), strerror(errno));
+			_exit(127);
+		} else {
+			if (errno!=0) {
+				fprintf(stderr, "fork set error %s\n", strerror(errno));
+			}
+			if (!kill(child, 0)) {
+				int wp;
+				while ((wp = waitpid(child, &ret, 0)) <= 0) {
+					fprintf(stderr, "waitpid(%d) returned %d, status=%d (%s)\n",
+							child, wp, ret, strerror(errno));
+				}
+				getOutput(buf, bufLen);
+			} else {
+				fprintf(stderr, "Child process %d `%s` not found (%s)\n",
+						child, theCommand.c_str(), strerror(errno));
+			}
+			error = errno;
 		}
-		error = errno;
 		return ret;
 	}
+	void getOutput(char *buf, size_t bufLen)
+	{
+		struct pollfd fds = { ipcPipes[0], POLLIN, 0 };
+		bool go = wantOutput ? true : (poll(&fds, 1, 250) > 0);
+		if (go) {
+			readlen = read(ipcPipes[0], buf, bufLen);
+			if (readlen > 1 && buf[readlen-1] == '\n') {
+				buf[readlen-1] = '\0';
+				readlen -= 1;
+			}
+		} else {
+			readlen = 0;
+		}
+	}
+
 	std::string theCommand;
 	static CRITSECTLOCK critsect;
 	char *buf = nullptr;
 	size_t bufLen;
 	int readlen = -1;
+	bool wantOutput;
 public:
 	int error;
 };
@@ -318,16 +386,19 @@ protected:
 	{
 		bool ret = false;
 		if (currentCompression != newComp) {
-			const std::string command = "zfs set compression=" + newComp + " \"" + *this + "\"";
-			fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
-			// do something like
-// 			auto worker = ZFSCommandEngine(command);
-// 			if (worker.Start() == 0) {
-// 				int exitval = worker.Join();
-// 				if (exitval || worker.getOutput().size() > 0) {
-// 					fprintf(stderr, "error: %s", worker.getOutput().c_str());
-// 				}
-// 			}
+			const std::string command = std::string(newComp == "test" ? "echo zfs" : "zfs")
+				+ " set compression=" + "bla" + " \"" + *this + "\"";
+// 				+ " get compression" + " \"" + *this + "\"";
+// 			fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
+			auto worker = ZFSCommandEngine(command, false);
+			if (worker.Start() == 0) {
+				int exitval = worker.Join(1000);
+				if (exitval || worker.getOutput().size() > 0) {
+					fprintf(stderr, /*"error: "*/"`%s`\n\t%s exitval=%d error \"%s\" (refcount=%d)\n",
+							command.c_str(),
+							worker.getOutput().c_str(), exitval, strerror(worker.error), int(refcount));
+				}
+			}
 			// on success:
 			currentCompression = newComp;
 			ret = true;
@@ -1186,7 +1257,10 @@ int zfsctool(int argc, const char *argv[])
 					std::set<std::string> compNames;
 					split(COMPRESSIONNAMES, compNames, '|');
 					//std::cerr << compNames << std::endl;
-					if (strcasecmp(argv[i], "test") && !compNames.count(codec)) {
+					if (strcasecmp(argv[i], "test")) {
+						// map to all lowercase
+						codec = "test";
+					} else if (!compNames.count(codec)) {
 						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
 						printUsage();
 						return(EINVAL);

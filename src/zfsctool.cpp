@@ -370,7 +370,7 @@ static void EmptyFSIdMap()
 }
 
 #ifdef __APPLE__
-static const char *_realpath(const char *name, char *resolved)
+static char *_realpath(const char *name, char *resolved)
 {
 	if (!resolved) {
 		resolved = (char*) malloc(PATH_MAX);

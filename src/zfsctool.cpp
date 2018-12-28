@@ -181,8 +181,8 @@ class ZFSCommandEngine : public Thread
 public:
 	ZFSCommandEngine(std::string command, bool wantOutput=true, size_t outputLen=256)
 		: theCommand(command)
-		, wantOutput(wantOutput)
 		, bufLen(outputLen)
+		, wantOutput(wantOutput)
 	{}
 	~ZFSCommandEngine()
 	{
@@ -248,17 +248,11 @@ protected:
 			if (errno!=0) {
 				fprintf(stderr, "fork set error %s\n", strerror(errno));
 			}
-			if (!kill(child, 0)) {
-				int wp;
-				while ((wp = waitpid(child, &ret, 0)) <= 0) {
-					fprintf(stderr, "waitpid(%d) returned %d, status=%d (%s)\n",
-							child, wp, ret, strerror(errno));
-				}
-				getOutput(buf, bufLen);
-			} else {
-				fprintf(stderr, "Child process %d `%s` not found (%s)\n",
-						child, theCommand.c_str(), strerror(errno));
-			}
+			int wp;
+			do {
+				wp = waitpid(child, &ret, 0);
+			} while(wp == -1 && errno == EINTR);
+			getOutput(buf, bufLen);
 			error = errno;
 		}
 		return ret;
@@ -387,16 +381,19 @@ protected:
 		bool ret = false;
 		if (currentCompression != newComp) {
 			const std::string command = std::string(newComp == "test" ? "echo zfs" : "zfs")
-				+ " set compression=" + "bla" + " \"" + *this + "\"";
+				+ " set compression=" + newComp + " \"" + *this + "\"";
 // 				+ " get compression" + " \"" + *this + "\"";
 // 			fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
 			auto worker = ZFSCommandEngine(command, false);
 			if (worker.Start() == 0) {
-				int exitval = worker.Join(1000);
-				if (exitval || worker.getOutput().size() > 0) {
-					fprintf(stderr, /*"error: "*/"`%s`\n\t%s exitval=%d error \"%s\" (refcount=%d)\n",
+				int waitval = worker.Join();
+				DWORD exitval = DWORD(worker.GetExitCode());
+				if (waitval || exitval) {
+					fprintf(stderr, "Error: `%s`\n\t%s exit code %lu error \"%s\" (refcount=%d)\n",
 							command.c_str(),
 							worker.getOutput().c_str(), exitval, strerror(worker.error), int(refcount));
+				} else if (newComp == "test" && worker.getOutput().size() > 0) {
+					fprintf(stderr, "test: %s\n", worker.getOutput().c_str());
 				}
 			}
 			// on success:
@@ -1257,11 +1254,11 @@ int zfsctool(int argc, const char *argv[])
 					std::set<std::string> compNames;
 					split(COMPRESSIONNAMES, compNames, '|');
 					//std::cerr << compNames << std::endl;
-					if (strcasecmp(argv[i], "test")) {
+					if (strcasecmp(argv[i], "test") == 0) {
 						// map to all lowercase
 						codec = "test";
 					} else if (!compNames.count(codec)) {
-						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
+						fprintf(stderr, "Unsupported or unknown ZFS compression requested (%s)\n", argv[i]);
 						printUsage();
 						return(EINVAL);
 					}

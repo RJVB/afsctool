@@ -10,7 +10,7 @@ option(ZLIB_SINGLESHOT
     May be somewhat faster at the expense of approx. 4x higher memory usage."
     OFF)
 
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules ${CMAKE_MODULE_PATH} )
+set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/_cmake/modules ${CMAKE_MODULE_PATH} )
 
 include(FeatureSummary)
 include(CheckIncludeFile)

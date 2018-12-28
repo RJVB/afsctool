@@ -386,7 +386,8 @@ protected:
 	{
 		bool ret = false;
 		if (currentCompression != newComp) {
-			const std::string command = std::string(newComp == "test" ? "echo zfs" : "zfs")
+			const std::string command = std::string((newComp == "test" || currentCompression == "test" )?
+				"echo zfs" : "zfs")
 				+ " set compression=" + newComp + " \"" + *this + "\"";
 			if (verbose) {
 				fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
@@ -411,7 +412,7 @@ protected:
 					ret = true;
 				}
 			} else {
-				fprintf(stderr, "`%s` failed to start (%d; %s)\n",
+				fprintf(stderr, "`%s` failed to start (%lu; %s)\n",
 						command.c_str(), startval, strerror(errno));
 				worker->Join(1000);
 			}

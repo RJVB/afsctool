@@ -156,6 +156,18 @@ public:
 	{}
 	virtual ~iZFSDataSetCompressionInfo()
 	{}
+	bool autoDelete()
+    {
+        return isAutoDelete;
+    }
+    bool setAutoDelete(bool val)
+    {
+        const auto current = isAutoDelete;
+        isAutoDelete = val;
+        return current;
+    }
+protected:
+    bool isAutoDelete = true;
 };
 
 typedef google::dense_hash_map<std::string,iZFSDataSetCompressionInfo*> iZFSDataSetCompressionInfoForName;

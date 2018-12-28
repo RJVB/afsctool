@@ -356,6 +356,33 @@ static google::dense_hash_map<FSId_t,iZFSDataSetCompressionInfo*> gZFSDataSetCom
 	}
 #endif
 
+static void EmptyFSIdMap()
+{
+	for (auto entry : gZFSDataSetCompressionForFSId) {
+		if (!entry.second->autoDelete()) {
+// 			std::cerr << "Deleting gZFSDataSetCompressionForFSId entry {"
+// 				<< entry.first << "," << *entry.second
+// 				<< "}" << std::endl;
+			delete entry.second;
+		}
+	}
+	gZFSDataSetCompressionForFSId.clear();
+}
+
+#ifdef __APPLE__
+static const char *_realpath(const char *name, char *resolved)
+{
+	if (!resolved) {
+		resolved = (char*) malloc(PATH_MAX);
+	}
+	if (resolved) {
+		resolved = realpath(name, resolved);
+	}
+	return resolved;
+}
+#define realpath(n,r) _realpath((n),(r))
+#endif
+
 static std::string makeAbsolute(const char *name)
 {
 	std::string absName;
@@ -393,7 +420,9 @@ bool fileIsCompressable(const char *inFile,
 #	endif
 	_isZFS = (fsInfo.f_type == S_MAGIC_ZFS);
 #endif
-	if (ret >= 0 && (S_ISREG(inFileInfo->st_mode) || S_ISLNK(inFileInfo->st_mode)) && _isZFS) {
+	if (ret >= 0
+			&& _isZFS
+			&& (S_ISREG(inFileInfo->st_mode) || (folderInfo->follow_sym_links && S_ISLNK(inFileInfo->st_mode)))) {
 		iZFSDataSetCompressionInfo *knownDataSet = nullptr;
 		if (PP && (knownDataSet = PP->z_dataSetForFile(inFile))) {
 			// file already has a dataset property: OK to compress
@@ -415,6 +444,8 @@ bool fileIsCompressable(const char *inFile,
 							inFile, strerror(errno));
 					return false;
 				}
+// 				fprintf(stderr, "%s: compressing target '%s'\n",
+// 						inFile, fName.c_str());
 			} else if (inFile[0] != '/') {
 				fName = makeAbsolute(inFile);
 				if (fName.empty()) {
@@ -458,9 +489,9 @@ bool fileIsCompressable(const char *inFile,
 						gZFSDataSetCompressionForFSId[fsId] = unknownDataSet;
 						knownDataSet = unknownDataSet;
 					} else {
-						// I don't think this will ever happen so be sloppy until proof of the contrary
-						fprintf(stderr, "Warning: leaking dataset info for %s\n", inFile);
 						gZFSDataSetCompressionForFSId[fsId] = knownDataSet = new ZFSDataSetCompressionInfo(properties);
+						// we'll have to deallocate this entry ourselves
+						knownDataSet->setAutoDelete(false);
 					}
 					retval = compressionOk(knownDataSet, folderInfo);
 				} else {
@@ -1025,10 +1056,11 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 void printUsage()
 {
 	printf("zfsctool %s\n"
-	   "Apply compression to file or folder: zfsctool -c[nlfvv[v]b] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-T compressor] file[s]/folder[s]\n\n"
+	   "Apply compression to file or folder: zfsctool -c[nlfFvv[v]b] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-T compressor] file[s]/folder[s]\n\n"
 	   "Options:\n"
 	   "-v Increase verbosity level\n"
 	   "-f Detect hard links\n"
+	   "-F follow symbolic links; compress the target if it is a regular file.\n"
 	   "-l List files which fail to compress\n"
 	   "-n Do not verify files after compression (not recommended)\n"
 	   "-m <size> Largest file size to compress, in bytes\n"
@@ -1052,9 +1084,9 @@ int zfsctool(int argc, const char *argv[])
 	char *folderarray[2], *fullpath = NULL, *fullpathdst = NULL, *cwd;
 	double minSavings = 0.0;
 	long long int maxSize = 0;
-	bool printDir = FALSE, createfile = FALSE, applycomp = FALSE,
+	bool printDir = FALSE, applycomp = FALSE,
 		 fileCheck = TRUE, argIsFile, hardLinkCheck = FALSE, dstIsFile, free_src = FALSE, free_dst = FALSE,
-		 allowLargeBlocks = FALSE, backupFile = FALSE;
+		 backupFile = FALSE, follow_sym_links = FALSE;
 	int nJobs = 0, nReverse = 0;
 	bool sortQueue = false;
 	std::string codec = "test";
@@ -1072,38 +1104,25 @@ int zfsctool(int argc, const char *argv[])
 		for (j = 1; j < strlen(argv[i]); j++) {
 			switch (argv[i][j]) {
 				case 'l':
-					if (createfile) {
-						printUsage();
-						return(EINVAL);
-					}
 					printDir = TRUE;
 					break;
 				case 'v':
 					printVerbose++;
 					break;
 				case 'c':
-					if (createfile) {
-						printUsage();
-						return(EINVAL);
-					}
 					applycomp = TRUE;
 					break;
 				case 'n':
-					if (createfile) {
-						printUsage();
-						return(EINVAL);
-					}
 					fileCheck = FALSE;
 					break;
 				case 'f':
-					if (createfile) {
-						printUsage();
-						return(EINVAL);
-					}
 					hardLinkCheck = TRUE;
 					break;
+				case 'F':
+					follow_sym_links = TRUE;
+					break;
 				case 'm':
-					if (createfile || j + 1 < strlen(argv[i]) || i + 2 > argc) {
+					if (j + 1 < strlen(argv[i]) || i + 2 > argc) {
 						printUsage();
 						return(EINVAL);
 					}
@@ -1179,7 +1198,7 @@ next_arg:
 		;
 	}
 
-	if (i == argc || ((createfile) && (argc - i < 2))) {
+	if (i == argc) {
 		printUsage();
 		return(EINVAL);
 	}
@@ -1214,42 +1233,33 @@ next_arg:
 	signal(SIGXFSZ, SIG_IGN);
 
 	int N, step, n;
-	if (createfile) {
-		N = argc - 1;
-		step = 2;
-	} else {
-		N = argc;
-		step = 1;
-	}
+	N = argc;
+	step = 1;
 	for (n = 0 ; i < N ; i += step, ++n) {
 		if (n && printVerbose > 0 && !nJobs) {
 			printf("\n");
 		}
-		if (createfile) {
-			if (argv[i + 1][0] != '/') {
+		if (argv[i][0] != '/') {
+			if (follow_sym_links) {
+				if (!(fullpath = realpath(argv[i], nullptr))) {
+					fprintf(stderr, "Unable to get real path for '%s' (%s)\n",
+							argv[i], strerror(errno));
+					return errno;
+				}
+				free_src = TRUE;
+			} else {
+				// make the path absolute by prepending the current working directory.
 				cwd = getcwd(NULL, 0);
 				if (cwd == NULL) {
 					fprintf(stderr, "Unable to get PWD, exiting...\n");
 					return(EACCES);
 				}
-				free_dst = TRUE;
-				fullpathdst = (char *) malloc(strlen(cwd) + strlen(argv[i + 1]) + 2);
-				sprintf(fullpathdst, "%s/%s", cwd, argv[i + 1]);
+				free_src = TRUE;
+				const size_t plen = strlen(cwd) + strlen(argv[i]) + 2;
+				fullpath = (char *) malloc(plen);
+				snprintf(fullpath, plen, "%s/%s", cwd, argv[i]);
 				free(cwd);
-			} else
-				fullpathdst = (char *) argv[i + 1];
-		}
-
-		if (argv[i][0] != '/') {
-			cwd = getcwd(NULL, 0);
-			if (cwd == NULL) {
-				fprintf(stderr, "Unable to get PWD, exiting...\n");
-				return(EACCES);
 			}
-			free_src = TRUE;
-			fullpath = (char *) malloc(strlen(cwd) + strlen(argv[i]) + 2);
-			sprintf(fullpath, "%s/%s", cwd, argv[i]);
-			free(cwd);
 		} else {
 			free_src = FALSE;
 			fullpath = (char *) argv[i];
@@ -1267,36 +1277,53 @@ next_arg:
 			folderarray[1] = NULL;
 		}
 
-		if (createfile && lstat(fullpathdst, &dstfileinfo) >= 0) {
-			dstIsFile = ((dstfileinfo.st_mode & S_IFDIR) == 0);
-			fprintf(stderr, "%s: %s already exists at this path\n", fullpath, dstIsFile ? "File" : "Folder");
-			continue;
-		}
+		folderinfo.uncompressed_size = 0;
+		folderinfo.uncompressed_size_rounded = 0;
+		folderinfo.compressed_size = 0;
+		folderinfo.compressed_size_rounded = 0;
+		folderinfo.compattr_size = 0;
+		folderinfo.total_size = 0;
+		folderinfo.num_compressed = 0;
+		folderinfo.num_files = 0;
+		folderinfo.num_hard_link_files = 0;
+		folderinfo.num_folders = 0;
+		folderinfo.num_hard_link_folders = 0;
+		folderinfo.print_info = (nJobs) ? false : printVerbose;
+		folderinfo.print_files = (nJobs == 0) ? printDir : 0;
+		folderinfo.compress_files = applycomp;
+		folderinfo.check_files = fileCheck;
+		folderinfo.z_compression = &codec;
+		folderinfo.minSavings = minSavings;
+		folderinfo.maxSize = maxSize;
+		folderinfo.check_hard_links = hardLinkCheck;
+		folderinfo.follow_sym_links = follow_sym_links;
+		folderinfo.backup_file = backupFile;
 
 		if (applycomp && argIsFile) {
-			struct folder_info fi;
-			fi.maxSize = maxSize;
-			fi.z_compression = &codec;
-			fi.allowLargeBlocks = allowLargeBlocks;
-			fi.minSavings = minSavings;
-			fi.check_files = fileCheck;
-			fi.backup_file = backupFile;
+			// this used to use a private folder_info struct with a settings subset:
+// 			struct folder_info fi;
+// 			fi.maxSize = maxSize;
+// 			fi.z_compression = &codec;
+// 			fi.minSavings = minSavings;
+// 			fi.check_files = fileCheck;
+// 			fi.backup_file = backupFile;
 			if (PP) {
-				if (fileIsCompressable(fullpath, &fileinfo, &fi, PP)) {
-					addFileToParallelProcessor(PP, fullpath, &fileinfo, &fi, true);
+				if (fileIsCompressable(fullpath, &fileinfo, &folderinfo, PP)) {
+					addFileToParallelProcessor(PP, fullpath, &fileinfo, &folderinfo, true);
 				} else {
 					process_file_info(fullpath, NULL, &fileinfo, getParallelProcessorJobInfo(PP));
 				}
 			} else {
-				compressFile(fullpath, &fileinfo, &fi, NULL);
+				compressFile(fullpath, &fileinfo, &folderinfo, NULL);
 			}
 			lstat(fullpath, &fileinfo);
+			fprintf(stderr, "(pre)processed %s\n", fullpath);
 		}
 
 		if (argIsFile && printVerbose > 0) {
-			struct folder_info fi;
-			fi.z_compression = &codec;
-			fileIsCompressable(fullpath, &fileinfo, &fi);
+// 			struct folder_info fi;
+// 			fi.z_compression = &codec;
+			fileIsCompressable(fullpath, &fileinfo, &folderinfo);
 			printFileInfo(fullpath, &fileinfo);
 		} else if (!argIsFile) {
 			if ((currfolder = fts_open(folderarray, FTS_PHYSICAL, NULL)) == NULL) {
@@ -1304,30 +1331,7 @@ next_arg:
 //				exit(EACCES);
 				continue;
 			}
-			if (PP) {
-				struct folder_info *fi = getParallelProcessorJobInfo(PP);
-			}
-			folderinfo.uncompressed_size = 0;
-			folderinfo.uncompressed_size_rounded = 0;
-			folderinfo.compressed_size = 0;
-			folderinfo.compressed_size_rounded = 0;
-			folderinfo.compattr_size = 0;
-			folderinfo.total_size = 0;
-			folderinfo.num_compressed = 0;
-			folderinfo.num_files = 0;
-			folderinfo.num_hard_link_files = 0;
-			folderinfo.num_folders = 0;
-			folderinfo.num_hard_link_folders = 0;
-			folderinfo.print_info = (nJobs) ? false : printVerbose;
-			folderinfo.print_files = (nJobs == 0) ? printDir : 0;
-			folderinfo.compress_files = applycomp;
-			folderinfo.check_files = fileCheck;
-			folderinfo.allowLargeBlocks = allowLargeBlocks;
-			folderinfo.z_compression = &codec;
-			folderinfo.minSavings = minSavings;
-			folderinfo.maxSize = maxSize;
-			folderinfo.check_hard_links = hardLinkCheck;
-			folderinfo.backup_file = backupFile;
+
 			process_folder(currfolder, &folderinfo);
 			folderinfo.num_folders--;
 			if (printVerbose > 0 || !printDir) {
@@ -1337,112 +1341,6 @@ next_arg:
 				} else {
 					printf("Adding %s to queue\n", fullpath);
 				}
-#if 0
-				if (folderinfo.filetypes != NULL) {
-					alltypesinfo.filetype = NULL;
-					alltypesinfo.uncompressed_size = 0;
-					alltypesinfo.uncompressed_size_rounded = 0;
-					alltypesinfo.compressed_size = 0;
-					alltypesinfo.compressed_size_rounded = 0;
-					alltypesinfo.compattr_size = 0;
-					alltypesinfo.total_size = 0;
-					alltypesinfo.num_compressed = 0;
-					alltypesinfo.num_files = 0;
-					alltypesinfo.num_hard_link_files = 0;
-					for (i = 0; i < folderinfo.numfiletypes; i++) {
-						alltypesinfo.uncompressed_size += folderinfo.filetypes[i].uncompressed_size;
-						alltypesinfo.uncompressed_size_rounded += folderinfo.filetypes[i].uncompressed_size_rounded;
-						alltypesinfo.compressed_size += folderinfo.filetypes[i].compressed_size;
-						alltypesinfo.compressed_size_rounded += folderinfo.filetypes[i].compressed_size_rounded;
-						alltypesinfo.compattr_size += folderinfo.filetypes[i].compattr_size;
-						alltypesinfo.total_size += folderinfo.filetypes[i].total_size;
-						alltypesinfo.num_compressed += folderinfo.filetypes[i].num_compressed;
-						alltypesinfo.num_files += folderinfo.filetypes[i].num_files;
-						alltypesinfo.num_hard_link_files += folderinfo.filetypes[i].num_hard_link_files;
-
-						if (!folderinfo.invert_filetypelist)
-							printf("\nFile content type: %s\n", folderinfo.filetypes[i].filetype);
-						if (folderinfo.filetypes[i].numextensions > 0) {
-							if (!folderinfo.invert_filetypelist)
-								printf("File extension(s): %s", folderinfo.filetypes[i].extensions[0]);
-							free(folderinfo.filetypes[i].extensions[0]);
-							for (j = 1; j < folderinfo.filetypes[i].numextensions; j++) {
-								if (!folderinfo.invert_filetypelist)
-									printf(", %s", folderinfo.filetypes[i].extensions[j]);
-								free(folderinfo.filetypes[i].extensions[j]);
-							}
-							free(folderinfo.filetypes[i].extensions);
-							if (!folderinfo.invert_filetypelist)
-								printf("\n");
-						}
-						if (!folderinfo.invert_filetypelist)
-							printf("Number of compressed files: %lld\n", folderinfo.filetypes[i].num_compressed);
-						if (printVerbose > 0 && nJobs == 0 && (!folderinfo.invert_filetypelist)) {
-							printf("Total number of files: %lld\n", folderinfo.filetypes[i].num_files);
-							if (hardLinkCheck)
-								printf("Total number of file hard links: %lld\n", folderinfo.filetypes[i].num_hard_link_files);
-							filesize = folderinfo.filetypes[i].uncompressed_size;
-							filesize_rounded = folderinfo.filetypes[i].uncompressed_size_rounded;
-							if (folderinfo.filetypes[i].num_hard_link_files == 0 || !hardLinkCheck)
-								printf("File(s) size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
-									   getSizeStr(filesize, filesize_rounded, 1));
-							else
-								printf("File(s) size (real): %s\n", getSizeStr(filesize, filesize_rounded, 0));
-							filesize = folderinfo.filetypes[i].compressed_size;
-							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded;
-							printf("File(s) size (compressed - decmpfs xattr): %s\n",
-								   getSizeStr(filesize, filesize_rounded, 0));
-							filesize = folderinfo.filetypes[i].compressed_size + folderinfo.filetypes[i].compattr_size;
-							filesize_rounded = folderinfo.filetypes[i].compressed_size_rounded + folderinfo.filetypes[i].compattr_size;
-							printf("File(s) size (on disk): %s\n", getSizeStr(filesize, filesize_rounded, 0));
-							printf("Compression savings: %0.1f%%\n", (1.0 - ((float)(folderinfo.filetypes[i].compressed_size + folderinfo.filetypes[i].compattr_size) / folderinfo.filetypes[i].uncompressed_size)) * 100.0);
-							filesize = folderinfo.filetypes[i].total_size;
-							printf("Approximate total file(s) size (files + file overhead): %s\n",
-								   getSizeStr(filesize, filesize, 0));
-						}
-						free(folderinfo.filetypes[i].filetype);
-					}
-					if (folderinfo.invert_filetypelist) {
-						alltypesinfo.uncompressed_size = folderinfo.uncompressed_size - alltypesinfo.uncompressed_size;
-						alltypesinfo.uncompressed_size_rounded = folderinfo.uncompressed_size_rounded - alltypesinfo.uncompressed_size_rounded;
-						alltypesinfo.compressed_size = folderinfo.compressed_size - alltypesinfo.compressed_size;
-						alltypesinfo.compressed_size_rounded = folderinfo.compressed_size_rounded - alltypesinfo.compressed_size_rounded;
-						alltypesinfo.compattr_size = folderinfo.compattr_size - alltypesinfo.compattr_size;
-						alltypesinfo.total_size = folderinfo.total_size - alltypesinfo.total_size;
-						alltypesinfo.num_compressed = folderinfo.num_compressed - alltypesinfo.num_compressed;
-						alltypesinfo.num_files = folderinfo.num_files - alltypesinfo.num_files;
-						alltypesinfo.num_hard_link_files = folderinfo.num_hard_link_files - alltypesinfo.num_hard_link_files;
-					}
-					if (folderinfo.numfiletypes > 1 || folderinfo.invert_filetypelist) {
-						printf("\nTotals of file content types\n");
-						printf("Number of compressed files: %lld\n", alltypesinfo.num_compressed);
-						if (printVerbose > 0 && nJobs == 0) {
-							printf("Total number of files: %lld\n", alltypesinfo.num_files);
-							if (hardLinkCheck)
-								printf("Total number of file hard links: %lld\n", alltypesinfo.num_hard_link_files);
-							filesize = alltypesinfo.uncompressed_size;
-							filesize_rounded = alltypesinfo.uncompressed_size_rounded;
-							if (alltypesinfo.num_hard_link_files == 0 || !hardLinkCheck)
-								printf("File(s) size (uncompressed; reported size by Mac OS 10.6+ Finder): %s\n",
-									   getSizeStr(filesize, filesize_rounded, 1));
-							else
-								printf("File(s) size (real): %s\n", getSizeStr(filesize, filesize_rounded, 0));
-							filesize = alltypesinfo.compressed_size;
-							filesize_rounded = alltypesinfo.compressed_size_rounded;
-							printf("File(s) size (compressed - decmpfs xattr): %s\n",
-								   getSizeStr(filesize, filesize_rounded, 0));
-							filesize = alltypesinfo.compressed_size + alltypesinfo.compattr_size;
-							filesize_rounded = alltypesinfo.compressed_size_rounded + alltypesinfo.compattr_size;
-							printf("File(s) size (on disk): %s\n", getSizeStr(filesize, filesize_rounded, 0));
-							printf("Compression savings: %0.1f%%\n", (1.0 - ((float)(alltypesinfo.compressed_size + alltypesinfo.compattr_size) / alltypesinfo.uncompressed_size)) * 100.0);
-							filesize = alltypesinfo.total_size;
-							printf("Approximate total file(s) size (files + file overhead): %s\n",
-								   getSizeStr(filesize, filesize, 0));
-						}
-					}
-					printf("\n");
-				}
-#endif //0
 				if (nJobs == 0) {
 					if (folderinfo.num_compressed == 0 && !applycomp)
 						printf("Folder contains no compressed files\n");
@@ -1504,8 +1402,18 @@ next_arg:
 		} else {
 			fprintf(stderr, "No compressable files found.\n");
 		}
+
+		// empty the FSId -> iZFSDataSetCompressionInfo map, deleting
+		// any entries that have remained under our ownership. Do
+		// this before releasing the PP instance because that would
+		// invalidate all the other entries.
+		EmptyFSIdMap();
+
 		releaseParallelProcessor(PP);
+	} else {
+		EmptyFSIdMap();
 	}
+
 	if (ipcPipes[0] != -1) {
 		close(ipcPipes[0]);
 	}

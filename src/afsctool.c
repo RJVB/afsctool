@@ -2662,8 +2662,9 @@ next_arg:;
 					exit(EACCES);
 				}
 				free_dst = TRUE;
-				fullpathdst = (char *) malloc(strlen(cwd) + strlen(argv[i+1]) + 2);
-				sprintf(fullpathdst, "%s/%s", cwd, argv[i+1]);
+				const size_t plen = strlen(cwd) + strlen(argv[i]) + 2;
+				fullpath = (char *) malloc(plen);
+				snprintf(fullpath, plen, "%s/%s", cwd, argv[i]);
 				free(cwd);
 			}
 			else

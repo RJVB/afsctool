@@ -139,8 +139,10 @@ ParallelFileProcessor::~ParallelFileProcessor()
 	z_dataSetInfoForFile.clear();
 	// delete any remaining values from the z_dataSetInfo map
 	for (auto elem : z_dataSetInfo) {
-		delete elem.second;
-		// the following is valid despite the lack of a call to set_deleted_key():
+		if (elem.second->autoDelete()) {
+			delete elem.second;
+		}
+		// the following would be valid despite the lack of a call to set_deleted_key():
 		// z_dataSetInfo.erase(elem.first);
 	}
 	// empty the map

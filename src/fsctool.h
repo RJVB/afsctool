@@ -50,6 +50,7 @@ struct folder_info
 	bool allowLargeBlocks;
 	bool check_files;
 	bool check_hard_links;
+    bool follow_sym_links;
 	struct filetype_info *filetypes;
 	long long int numfiletypes;
 	long long int filetypessize;

@@ -386,8 +386,8 @@ protected:
 	{
 		bool ret = false;
 		if (currentCompression != newComp) {
-			const std::string command = std::string((newComp == "test" || currentCompression == "test" )?
-				"echo zfs" : "zfs")
+			bool testing = (newComp == "test" || currentCompression == "test");
+			const std::string command = std::string(testing ? "echo zfs" : "zfs")
 				+ " set compression=" + newComp + " \"" + *this + "\"";
 			if (verbose) {
 				fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
@@ -403,7 +403,7 @@ protected:
 					fprintf(stderr, "`%s`\n\t%s exit code %lu error \"%s\" (refcount=%d)\n",
 							command.c_str(),
 							worker->getOutput().c_str(), exitval, strerror(worker->error), int(refcount));
-				} else if (newComp == "test" && worker->getOutput().size() > 0) {
+				} else if (testing && worker->getOutput().size() > 0) {
 					fprintf(stderr, "test: %s\n", worker->getOutput().c_str());
 				}
 				if (exitval == 0) {

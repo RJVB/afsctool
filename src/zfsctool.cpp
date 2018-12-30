@@ -174,8 +174,36 @@ static bool quitRequested = FALSE;
 
 static void signal_handler(int sig)
 {
-	fprintf(stderr, "Received signal %d: zfsctool will quit (please be patient!)\n", sig);
-	stopParallelProcessor(PP);
+	char *msg = nullptr;
+	switch (sig) {
+		case SIGHUP:
+		case SIGINT:
+		case SIGTERM:
+			msg = (char*) "Received quit request: zfsctool will exit (please be patient!)\n";
+		default:
+			if (!msg) {
+				msg = (char*) "Going down on signal; dataset compression will probably NOT be reset!\n";
+			}
+			// this may or may not have any effect (it should with HUP/INT/TERM)
+			// but it's safe (toggles a flag)
+			if (PP) {
+				stopParallelProcessor(PP);
+			} else {
+				quitRequested = true;
+			}
+			break;
+		// signals we cannot recover from; inform the user in a signal-safe way:
+		case SIGBUS:
+			msg = (char*) "Going down on BUS error; dataset compression will NOT be reset!\n";
+			break;
+		case SIGSEGV:
+			msg = (char*) "Going down on SEGV error; dataset compression will NOT be reset!\n";
+			break;
+			break;
+	}
+	if (msg) {
+		write(STDERR_FILENO, msg, strlen(msg));
+	}
 }
 
 class ZFSCommandEngine : public Thread
@@ -676,8 +704,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	mode_t orig_mode;
 	struct timeval times[2];
 	char *backupName = NULL;
-	bool useMmap = false;
 	bool testing = (*folderinfo->z_compression == "test");
+	struct stat inFileInfoBak;
 
 	if (quitRequested) {
 		return;
@@ -714,6 +742,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		return;
 	}
 	orig_mode = inFileInfo->st_mode;
+
 	if (!testing) {
 		if ((orig_mode & S_IWUSR) == 0) {
 			chmod(inFile, orig_mode | S_IWUSR);
@@ -725,10 +754,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 	}
 
-#if !defined(NO_USE_MMAP)
-	useMmap = true;
-#endif
-
 	bool locked = false;
 	// use open() with an exclusive lock so no one can modify the file while we're at it
 	// open RO in testing mode
@@ -737,40 +762,22 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 		goto bail;
 	}
-#ifndef NO_USE_MMAP
-	if (useMmap) {
-		// get a private mmap. We rewrite to the file's attributes and/or resource fork,
-		// so there is no point in using a shared mapping where changes to the memory
-		// are mapped back to disk. The use of NOCACHE is experimental; if I understand
-		// the documentation correctly this just means that released memory can be
-		// reused more easily.
-		inBuf = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE | MAP_NOCACHE, fdIn, 0);
-		if (inBuf == MAP_FAILED) {
-			fprintf(stderr, "%s: Error m'mapping file (size %lld; %s)\n", inFile, filesize, strerror(errno));
-			useMmap = false;
-		} else {
-			madvise(inBuf, filesize, MADV_RANDOM);
-		}
+	inBuf = malloc(filesize);
+	if (inBuf == NULL) {
+		fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, filesize, strerror(errno));
+		xclose(fdIn);
+		utimes(inFile, times);
+		return;
 	}
-	if (!useMmap)
-#endif
-	{
-		inBuf = malloc(filesize);
-		if (inBuf == NULL) {
-			fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, filesize, strerror(errno));
-			xclose(fdIn);
-			utimes(inFile, times);
-			return;
-		}
-		madvise(inBuf, filesize, MADV_RANDOM);
-		if (read(fdIn, inBuf, filesize) != filesize) {
-			fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));
-			xclose(fdIn);
-			utimes(inFile, times);
-			free(inBuf);
-			return;
-		}
+	madvise(inBuf, filesize, MADV_SEQUENTIAL);
+	if (read(fdIn, inBuf, filesize) != filesize) {
+		fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));
+		xclose(fdIn);
+		utimes(inFile, times);
+		free(inBuf);
+		return;
 	}
+
 	// keep our filedescriptor open to maintain the lock!
 	if (backupFile) {
 		int fd, bkNameLen;
@@ -825,7 +832,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 		ssize_t written;
 		if ((written = write(fdIn, inBuf, filesize)) != filesize) {
-			fprintf(stderr, "%s: Error writing to file (written %lld of %lld bytes; %s)\n",
+			fprintf(stderr, "%s: Error writing to file (written %ld of %lld bytes; %s)\n",
 					inFile, written, filesize, strerror(errno));
 			if (backupName) {
 				fprintf(stderr, "\ta backup is available as %s\n", backupName);
@@ -841,8 +848,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	xclose(fdIn);
 
-	if (checkFiles) {
+	// backup information we still need
+	inFileInfoBak = *inFileInfo;
+	// update the stat info shared with our caller
+	// so it knows about the resulting filesize
+	if (folderinfo->follow_sym_links) {
+		stat(inFile, inFileInfo);
+	} else {
 		lstat(inFile, inFileInfo);
+	}
+	if (checkFiles) {
 		bool sizeMismatch = inFileInfo->st_size != filesize, readFailure = false, contentMismatch = false;
 		ssize_t checkRead = -2;
 		bool outBufMMapped = false;
@@ -855,11 +870,10 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		if (!sizeMismatch) {
 #ifndef NO_USE_MMAP
-			xfree(outBuf);
 			outBuf = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE | MAP_NOCACHE, fdIn, 0);
 			outBufMMapped = true;
 #else
-			outBuf = reallocf(outBuf, filesize);
+			outBuf = malloc(outBuf, filesize);
 #endif
 			if (!outBuf) {
 				xclose(fdIn);
@@ -914,25 +928,10 @@ fail:
 		dataset->resetCompression();
 	}
 
-// #ifndef NO_USE_MMAP
-// 	{
-// 		char *tFileName = NULL;
-// 		asprintf(&tFileName, "%s.%s", inFile, ".RestoreTest");
-// 		int fdTest = open(tFileName, O_WRONLY|O_CREAT|O_EXCL);
-// 		if (fdTest != -1) {
-// 			if (write(fdTest, inBuf, filesize) != filesize) {
-// 				fprintf(stderr, "%s: Error writing to testfile %s (%lld bytes; %s)\n", inFile, tFileName, filesize, strerror(errno));
-// 			}
-// 			close(fdTest);
-// 			chmod(tFileName, orig_mode);
-// 		}
-// 		xfree(tFileName)
-// 	}
-// #endif
 bail:
 	if (!testing) {
 		utimes(inFile, times);
-		if (inFileInfo->st_mode != orig_mode) {
+		if (inFileInfoBak.st_mode != orig_mode) {
 			chmod(inFile, orig_mode);
 		}
 	}
@@ -947,14 +946,7 @@ bail:
 		free(backupName);
 		backupName = NULL;
 	}
-#ifndef NO_USE_MMAP
-	if (useMmap) {
-		xmunmap(inBuf, filesize);
-	} else
-#endif
-	{
-		xfree(inBuf);
-	}
+	xfree(inBuf);
 	xfree(outBuf);
 }
 
@@ -1412,6 +1404,11 @@ next_arg:
 	// ignore signals due to exceeding CPU or file size limits
 	signal(SIGXCPU, SIG_IGN);
 	signal(SIGXFSZ, SIG_IGN);
+	signal(SIGINT, signal_handler);
+	signal(SIGHUP, signal_handler);
+	signal(SIGTERM, signal_handler);
+	signal(SIGBUS, signal_handler);
+	signal(SIGSEGV, signal_handler);
 
 	int N, step, n;
 	N = argc;
@@ -1568,8 +1565,6 @@ next_arg:
 				}
 				changeParallelProcessorJobs(PP, nJobs, nReverse);
 			}
-			signal(SIGINT, signal_handler);
-			signal(SIGHUP, signal_handler);
 			fprintf(stderr, "Starting %d worker thread(s) to (re)compress %lu file(s) with compression '%s'\n",
 					nJobs, nFiles, codec.c_str());
 			int processed = runParallelProcessor(PP);

@@ -206,6 +206,38 @@ static void signal_handler(int sig)
 	}
 }
 
+// from http://www.martinbroadhurst.com/how-to-split-a-string-in-c.html:
+template <class Container>
+void split(const std::string &str, Container &cont, char delim='\t')
+{
+    std::stringstream ss(str);
+    std::string token;
+    while (std::getline(ss, token, delim)) {
+        cont.push_back(token);
+    }
+}
+
+template <typename T>
+void split(const std::string &str, std::set<T> &cont, char delim='\t')
+{
+    std::stringstream ss(str);
+    std::string token;
+    while (std::getline(ss, token, delim)) {
+        cont.insert(token);
+    }
+}
+
+// https://stackoverflow.com/questions/28803252/c-printing-or-cout-a-standard-library-container-to-console
+// this is a simpler version of functionality provided through prettyprint.hpp but works only for std containers
+// template <class container>
+// std::ostream& operator<<(std::ostream& os, const container& c)
+// {
+//     std::copy(c.begin(),
+//               c.end(),
+//               std::ostream_iterator<typename container::value_type>(os, " "));
+//     return os;
+// }
+
 class ZFSCommandEngine : public Thread
 {
 public:
@@ -318,26 +350,30 @@ CRITSECTLOCK ZFSCommandEngine::critsect(4000);
 class ZFSDataSetCompressionInfo : public iZFSDataSetCompressionInfo
 {
 public:
-	ZFSDataSetCompressionInfo(const char *name, const char *compression)
+	ZFSDataSetCompressionInfo(const char *name, const char *compression, const char *sync)
 		: iZFSDataSetCompressionInfo(name, compression)
 		, initialCompression(compression)
 		, currentCompression(compression)
+		, initialSync(sync)
 		, critsect(new CRITSECTLOCK(4000))
 		, refcount(0)
 		, shuntedIncreases(0)
 		, shuntedDecreases(0)
 	{
-		fprintf(stderr, "dataset '%s' has compression '%s'\n",
-				name, compression);
+		std::vector<std::string> components;
+		split(*this, components, '/');
+		poolName = components[0];
+		fprintf(stderr, "dataset '%s' of pool '%s' has compression '%s' and sync=%s\n",
+				name, poolName.c_str(), compression, sync);
 	}
 	ZFSDataSetCompressionInfo(std::vector<std::string>props)
-		: ZFSDataSetCompressionInfo(props[0].c_str(), props[1].c_str())
+		: ZFSDataSetCompressionInfo(props[0].c_str(), props[1].c_str(), props[2].c_str())
 	{}
 
 	virtual ~ZFSDataSetCompressionInfo()
 	{
 		// do something relevant here.
-		_setCompression(initialCompression, true);
+		_setCompression(initialCompression, true, true);
 		delete critsect;
 		if (shuntedDecreases || shuntedIncreases) {
 			fprintf(stderr, "%s: void calls of setCompression() and resetCompression(): %d vs. %d\n",
@@ -374,20 +410,21 @@ public:
 		const std::string newComp = compression;
 		return setCompression(newComp);
 	}
-	bool resetCompression()
+	bool resetCompression(bool force=false)
 	{
 		bool retval = false;
-		if (refcount.fetch_sub(1) == 1) {
+		if (refcount.fetch_sub(1) == 1 || force) {
 			CRITSECTLOCK::Scope lock(critsect);
-			retval = _setCompression(initialCompression);
+			retval = _setCompression(initialCompression, true);
 		} else {
 			shuntedDecreases.fetch_add(1);
 		}
 		return retval;
 	}
 
+	std::string poolName;
 	std::string initialCompression, currentCompression;
-	std::string mountPoint;
+	std::string initialSync;
 
 // 	template <typename CharT, typename Traits>
 // 	friend std::basic_ostream<CharT, Traits> &operator <<(std::basic_ostream <CharT, Traits> &os, const ZFSDataSetCompressionInfo &x)
@@ -411,7 +448,7 @@ public:
 // 		return os;
 // 	};
 protected:
-	bool _setCompression(const std::string &newComp, bool verbose=false)
+	bool _setCompression(const std::string &newComp, bool resetting=false, bool verbose=false)
 	{
 		bool ret = false;
 		if (quitRequested && newComp != initialCompression) {
@@ -421,19 +458,18 @@ protected:
 		}
 		if (currentCompression != newComp) {
 			bool testing = (newComp == "test" || currentCompression == "test");
-			const std::string command = std::string(testing ? "echo zfs" : "zfs")
-				+ " set compression=" + newComp + " \"" + *this + "\"";
+			std::string command = std::string(testing ? "echo zfs" : "zfs")
+				+ " set compression=" + newComp;
+// 			if (resetting) {
+// 				// resetting, restore sync too
+// 				command += " sync=" + initialSync;
+// 			} else {
+// 				command += " sync=always";
+// 			}
+			command += " \"" + *this + "\"";
 			if (verbose) {
 				fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
 			}
-			// flush the dataset before changing its compression:
-// 			int dirFd = open(mountPoint.c_str(), O_RDONLY|O_NONBLOCK);
-// 			if (dirFd < 0) {
-				sync();
-// 			} else {
-// 				synfs(dirFd);
-// 				close(dirFd);
-// 			}
 			// use 'new' because automatic instances tend to get the same address
 			// which feels "wrong" in this context.
 			auto worker = new ZFSCommandEngine(command, false);
@@ -467,38 +503,6 @@ protected:
 	std::atomic_int refcount, shuntedIncreases, shuntedDecreases;
 };
 
-// from http://www.martinbroadhurst.com/how-to-split-a-string-in-c.html:
-template <class Container>
-void split(const std::string &str, Container &cont, char delim='\t')
-{
-    std::stringstream ss(str);
-    std::string token;
-    while (std::getline(ss, token, delim)) {
-        cont.push_back(token);
-    }
-}
-
-template <typename T>
-void split(const std::string &str, std::set<T> &cont, char delim='\t')
-{
-    std::stringstream ss(str);
-    std::string token;
-    while (std::getline(ss, token, delim)) {
-        cont.insert(token);
-    }
-}
-
-// https://stackoverflow.com/questions/28803252/c-printing-or-cout-a-standard-library-container-to-console
-// this is a simpler version of functionality provided through prettyprint.hpp but works only for std containers
-// template <class container>
-// std::ostream& operator<<(std::ostream& os, const container& c)
-// {
-//     std::copy(c.begin(),
-//               c.end(),
-//               std::ostream_iterator<typename container::value_type>(os, " "));
-//     return os;
-// }
-
 typedef uint64_t FSId_t;
 static google::dense_hash_map<FSId_t,iZFSDataSetCompressionInfo*> gZFSDataSetCompressionForFSId;
 #if defined(linux)
@@ -523,7 +527,7 @@ static void EmptyFSIdMap()
 		// do the compression reset here instead of through the PP dtor
 		if (!quickCompressionReset) {
 			if (auto dataset = dynamic_cast<ZFSDataSetCompressionInfo*>(entry.second)) {
-				dataset->setCompression(dataset->initialCompression);
+				dataset->resetCompression(true);
 			}
 		}
 		if (!entry.second->autoDelete()) {
@@ -562,10 +566,16 @@ static std::string makeAbsolute(const char *name)
 }
 
 // check if the given dataset doesn't already use the requested new compression 
-static bool compressionOk(const iZFSDataSetCompressionInfo *dataset, const struct folder_info *fi)
+// or when z_compression=="off" and the file examined has on-disk size < real size
+// (NB: 
+static bool compressionOk(const iZFSDataSetCompressionInfo *dataset, const struct stat *st, const struct folder_info *fi)
 {
 	auto info = dynamic_cast<const ZFSDataSetCompressionInfo*>(dataset);
-	return (info && fi)? info->initialCompression != *fi->z_compression : false;
+	if (info && fi) {
+		return (info->initialCompression != *fi->z_compression)
+			|| (st && *fi->z_compression == "off" && st->st_blocks * S_BLKSIZE < st->st_size);
+	}
+	return false;
 }
 
 static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
@@ -594,7 +604,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 		if (PP && (knownDataSet = PP->z_dataSetForFile(inFile))) {
 			// file already has a dataset property: OK to compress
 			// if the dataset doesn't already have the requested compression set.
-			return compressionOk(knownDataSet, folderInfo) ?
+			return compressionOk(knownDataSet, inFileInfo, folderInfo) ?
 				dynamic_cast<ZFSDataSetCompressionInfo*>(knownDataSet) : nullptr;
 		} else {
 			if (gZFSDataSetCompressionForFSId.count(fsId)) {
@@ -602,7 +612,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 				if (PP) {
 					PP->z_addDataSet(inFile, knownDataSet);
 				}
-				return compressionOk(knownDataSet, folderInfo) ?
+				return compressionOk(knownDataSet, inFileInfo, folderInfo) ?
 					dynamic_cast<ZFSDataSetCompressionInfo*>(knownDataSet) : nullptr;
 			}
 			std::string fName;
@@ -630,7 +640,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 			// valid dataset mountpoint, or else return an error;
 			std::string dataSetName;
 			// use 'new' here too.
-			auto worker = new ZFSCommandEngine("zfs list -H -o name,compression \"" + fName + "\"", MAXPATHLEN);
+			auto worker = new ZFSCommandEngine("zfs list -H -o name,compression,sync \"" + fName + "\"", MAXPATHLEN);
 			if (worker->Start() == 0 || worker->isStarted()) {
 				if (int exitval = worker->Join()) {
 					fprintf(stderr, "\t`%s` returned %d (%s)\n", worker->command().c_str(), exitval, strerror(worker->error));
@@ -653,7 +663,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 				// split that:
 				std::vector<std::string> properties;
 				split(dataSetName, properties);
-				if (properties.size() == 2) {
+				if (properties.size() == 3) {
 					if (PP) {
 						knownDataSet = PP->z_dataSet(properties[0]);
 						auto unknownDataSet = knownDataSet? knownDataSet : new ZFSDataSetCompressionInfo(properties);
@@ -665,7 +675,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 						// we'll have to deallocate this entry ourselves
 						knownDataSet->setAutoDelete(false);
 					}
-					retval = compressionOk(knownDataSet, folderInfo);
+					retval = compressionOk(knownDataSet, inFileInfo, folderInfo);
 				} else {
 					fprintf(stderr, "Skipping '%s' because '%s' parses to %lu items\n",
 							inFile, dataSetName.c_str(), properties.size());
@@ -847,6 +857,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 
 	xclose(fdIn);
+	// TODO: call `zpool sync` after closing a rewritten file
 
 	// backup information we still need
 	inFileInfoBak = *inFileInfo;
@@ -926,6 +937,13 @@ fail:
 	// reset the dataset compression (if no other rewrites are ongoing)
 	if (quickCompressionReset) {
 		dataset->resetCompression();
+	}
+
+	// once more in hopes we now get an accurate on-disk size
+	if (folderinfo->follow_sym_links) {
+		stat(inFile, inFileInfo);
+	} else {
+		lstat(inFile, inFileInfo);
 	}
 
 bail:
@@ -1224,7 +1242,7 @@ void printUsage()
 	   "-T <compression> Compression codec to use, chosen from the supported ZFS compression types:\n"
 	   "                 " COMPRESSIONNAMES "\n"
 	   "                 or 'test' to perform a dry-run.\n"
-	   "-1 quick(er): reset the original dataset compression properties at the end instead of ASAP.\n"
+	   "-q quick(er): reset the original dataset compression properties at the end instead of ASAP.\n"
 	   "   This increases the chance that other files are written with the new compression.\n"
 	   , AFSCTOOL_FULL_VERSION_STRING);
 }

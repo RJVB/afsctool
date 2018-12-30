@@ -422,6 +422,44 @@ public:
 		return retval;
 	}
 
+	bool sync(bool verbose=false, bool testing=false)
+	{
+		bool ret = false;
+		{
+			std::string command = std::string(testing ? "echo zpool" : "zpool")
+				+ " sync";
+			command += " \"" + poolName + "\"";
+			if (verbose) {
+				fprintf(stderr, "%s\n", command.c_str());
+			}
+			// use 'new' because automatic instances tend to get the same address
+			// which feels "wrong" in this context.
+			auto worker = new ZFSCommandEngine(command, false);
+			auto startval = worker->Start();
+			if (startval == 0 || worker->isStarted()) {
+				int waitval = worker->Join();
+				DWORD exitval = DWORD(worker->GetExitCode());
+				if (waitval || exitval || verbose) {
+					fprintf(stderr, "`%s`\n\t%s exit code %lu error \"%s\" (refcount=%d)\n",
+							command.c_str(),
+							worker->getOutput().c_str(), exitval, strerror(worker->error), int(refcount));
+				} else if (testing && worker->getOutput().size() > 0) {
+					fprintf(stderr, "test: %s\n", worker->getOutput().c_str());
+				}
+				if (exitval == 0) {
+					// on success:
+					ret = true;
+				}
+			} else {
+				fprintf(stderr, "`%s` failed to start (%lu; %s)\n",
+						command.c_str(), startval, strerror(errno));
+				worker->Join(1000);
+			}
+			delete worker;
+		}
+		return ret;
+	}
+
 	std::string poolName;
 	std::string initialCompression, currentCompression;
 	std::string initialSync;
@@ -857,7 +895,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 
 	xclose(fdIn);
-	// TODO: call `zpool sync` after closing a rewritten file
+
+#ifndef __APPLE__
+	if (dataset && printVerbose > 0) {
+		if (!testing) {
+			// don't use ZFSCommandEngine here because it would serialise the compression workers
+			std::string command = "zpool sync \"" + dataset->poolName + "\"";
+			system(command.c_str());
+		}
+	}
+#endif
 
 	// backup information we still need
 	inFileInfoBak = *inFileInfo;
@@ -937,13 +984,6 @@ fail:
 	// reset the dataset compression (if no other rewrites are ongoing)
 	if (quickCompressionReset) {
 		dataset->resetCompression();
-	}
-
-	// once more in hopes we now get an accurate on-disk size
-	if (folderinfo->follow_sym_links) {
-		stat(inFile, inFileInfo);
-	} else {
-		lstat(inFile, inFileInfo);
 	}
 
 bail:

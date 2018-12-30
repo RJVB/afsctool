@@ -359,6 +359,7 @@ public:
 	}
 
 	std::string initialCompression, currentCompression;
+	std::string mountPoint;
 
 // 	template <typename CharT, typename Traits>
 // 	friend std::basic_ostream<CharT, Traits> &operator <<(std::basic_ostream <CharT, Traits> &os, const ZFSDataSetCompressionInfo &x)
@@ -385,6 +386,11 @@ protected:
 	bool _setCompression(const std::string &newComp, bool verbose=false)
 	{
 		bool ret = false;
+		if (quitRequested && newComp != initialCompression) {
+			fprintf(stderr, "Quitting - not setting new compression %s on %s\n",
+					newComp.c_str(), c_str());
+			return false;
+		}
 		if (currentCompression != newComp) {
 			bool testing = (newComp == "test" || currentCompression == "test");
 			const std::string command = std::string(testing ? "echo zfs" : "zfs")
@@ -392,6 +398,14 @@ protected:
 			if (verbose) {
 				fprintf(stderr, "%s (refcount now %d)\n", command.c_str(), int(refcount));
 			}
+			// flush the dataset before changing its compression:
+// 			int dirFd = open(mountPoint.c_str(), O_RDONLY|O_NONBLOCK);
+// 			if (dirFd < 0) {
+				sync();
+// 			} else {
+// 				synfs(dirFd);
+// 				close(dirFd);
+// 			}
 			// use 'new' because automatic instances tend to get the same address
 			// which feels "wrong" in this context.
 			auto worker = new ZFSCommandEngine(command, false);
@@ -663,6 +677,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	struct timeval times[2];
 	char *backupName = NULL;
 	bool useMmap = false;
+	bool testing = (*folderinfo->z_compression == "test");
 
 	if (quitRequested) {
 		return;
@@ -699,16 +714,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		return;
 	}
 	orig_mode = inFileInfo->st_mode;
-#ifdef WE_ARE_FUNCTIONAL
-	if ((orig_mode & S_IWUSR) == 0) {
-		chmod(inFile, orig_mode | S_IWUSR);
-		lstat(inFile, inFileInfo);
+	if (!testing) {
+		if ((orig_mode & S_IWUSR) == 0) {
+			chmod(inFile, orig_mode | S_IWUSR);
+			lstat(inFile, inFileInfo);
+		}
+		if ((orig_mode & S_IRUSR) == 0) {
+			chmod(inFile, orig_mode | S_IRUSR);
+			lstat(inFile, inFileInfo);
+		}
 	}
-	if ((orig_mode & S_IRUSR) == 0) {
-		chmod(inFile, orig_mode | S_IRUSR);
-		lstat(inFile, inFileInfo);
-	}
-#endif
 
 #if !defined(NO_USE_MMAP)
 	useMmap = true;
@@ -716,11 +731,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	bool locked = false;
 	// use open() with an exclusive lock so no one can modify the file while we're at it
-#ifdef WE_ARE_FUNCTIONAL
-	int fdIn = open(inFile, O_RDWR | O_EXLOCK);
-#else
-	int fdIn = open(inFile, O_RDONLY | O_EXLOCK);
-#endif
+	// open RO in testing mode
+	int fdIn = testing ? open(inFile, O_RDONLY | O_EXLOCK) : open(inFile, O_RDWR | O_EXLOCK);
 	if (fdIn == -1) {
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 		goto bail;
@@ -806,24 +818,29 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	// (or none at all if already changed and not reset)
 	dataset->setCompression(folderinfo->z_compression);
 
-#ifdef WE_ARE_FUNCTIONAL
-	// fdIn is still open
-	ftruncate(fdIn, 0);
-	lseek(fdIn, SEEK_SET, 0);
+	if (!testing) {
+		// fdIn is still open
+		ftruncate(fdIn, 0);
+		lseek(fdIn, SEEK_SET, 0);
 
-	if (write(fdIn, inBuf, filesize) != filesize) {
-		fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
-		if (backupName) {
-			fprintf(stderr, "\ta backup is available as %s\n", backupName);
-			xfree(backupName);
+		ssize_t written;
+		if ((written = write(fdIn, inBuf, filesize)) != filesize) {
+			fprintf(stderr, "%s: Error writing to file (written %lld of %lld bytes; %s)\n",
+					inFile, written, filesize, strerror(errno));
+			if (backupName) {
+				fprintf(stderr, "\ta backup is available as %s\n", backupName);
+				xfree(backupName);
+			}
+			xclose(fdIn)
+			goto bail;
 		}
-		xclose(fdIn)
-		goto bail;
+		fsync(fdIn);
+	} else {
+		lseek(fdIn, SEEK_SET, 0);
 	}
-#endif
 
-	fsync(fdIn);
 	xclose(fdIn);
+
 	if (checkFiles) {
 		lstat(inFile, inFileInfo);
 		bool sizeMismatch = inFileInfo->st_size != filesize, readFailure = false, contentMismatch = false;
@@ -913,12 +930,12 @@ fail:
 // 	}
 // #endif
 bail:
-#ifdef WE_ARE_FUNCTIONAL
-	utimes(inFile, times);
-	if (inFileInfo->st_mode != orig_mode) {
-		chmod(inFile, orig_mode);
+	if (!testing) {
+		utimes(inFile, times);
+		if (inFileInfo->st_mode != orig_mode) {
+			chmod(inFile, orig_mode);
+		}
 	}
-#endif
 	if (worker && locked) {
 		locked = worker->unLockScope();
 	}

@@ -247,6 +247,7 @@ public:
 		, bufLen(outputLen)
 		, readlen(-1)
 		, wantOutput(wantOutput)
+	    , active(0)
 	{}
 	~ZFSCommandEngine()
 	{
@@ -277,6 +278,10 @@ protected:
 	DWORD Run(LPVOID)
 	{
 		CRITSECTLOCK::Scope lock(critsect);
+		if (active.fetch_add(1) > 1) { 
+			fprintf(stderr, "%d concurrent ZFS commands (current: %s); this shouldn't happen!\n",
+					active.load(), theCommand.c_str());
+		}
 		buf = new char[bufLen];
 		pid_t child;
 		int ret = -1;
@@ -319,6 +324,7 @@ protected:
 			getOutput(buf, bufLen);
 			error = errno;
 		}
+		active.fetch_sub(1);
 		return ret;
 	}
 	void getOutput(char *buf, size_t bufLen)
@@ -342,6 +348,7 @@ protected:
 	size_t bufLen;
 	int readlen;
 	bool wantOutput;
+	std::atomic_int active;
 public:
 	int error;
 };
@@ -426,7 +433,6 @@ public:
 	bool sync(bool verbose=false, bool testing=false)
 	{
 		bool ret = false;
-		static int active = 0;
 		{
 			std::string command = std::string(testing ? "echo zpool" : "zpool")
 				+ " sync";
@@ -438,10 +444,6 @@ public:
 			// which feels "wrong" in this context.
 			auto worker = new ZFSCommandEngine(command, false);
 			auto startval = worker->Start();
-			active += 1;
-			if (active > 1) { 
-				fprintf(stderr, "%d `zpool sync` workers; this shouldn't happen!\n", active);
-			}
 			if (startval == 0 || worker->isStarted()) {
 				int waitval = worker->Join();
 				DWORD exitval = DWORD(worker->GetExitCode());
@@ -461,7 +463,6 @@ public:
 						command.c_str(), startval, strerror(errno));
 				worker->Join(1000);
 			}
-			active--;
 			delete worker;
 		}
 		return ret;

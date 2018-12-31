@@ -355,6 +355,7 @@ public:
 		, initialCompression(compression)
 		, currentCompression(compression)
 		, initialSync(sync)
+		, readOnly(false)
 		, critsect(new CRITSECTLOCK(4000))
 		, refcount(0)
 		, shuntedIncreases(0)
@@ -463,6 +464,7 @@ public:
 	std::string poolName;
 	std::string initialCompression, currentCompression;
 	std::string initialSync;
+	std::atomic_bool readOnly;
 
 // 	template <typename CharT, typename Traits>
 // 	friend std::basic_ostream<CharT, Traits> &operator <<(std::basic_ostream <CharT, Traits> &os, const ZFSDataSetCompressionInfo &x)
@@ -639,6 +641,12 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 	if (ret >= 0
 			&& _isZFS
 			&& (S_ISREG(inFileInfo->st_mode) || (folderInfo->follow_sym_links && S_ISLNK(inFileInfo->st_mode)))) {
+		const auto blksize = roundToBlkSize(inFileInfo->st_size, inFileInfo);
+		if (blksize >= (fsInfo.f_bfree * fsInfo.f_bsize) && *folderInfo->z_compression == "off") {
+			fprintf(stderr, "Skipping '%s' because its size %llu >= %llu available space on its dataset.\n",
+					inFile, inFileInfo->st_size, fsInfo.f_bfree * fsInfo.f_bsize);
+			return nullptr;
+		}
 		if (PP && (knownDataSet = PP->z_dataSetForFile(inFile))) {
 			// file already has a dataset property: OK to compress
 			// if the dataset doesn't already have the requested compression set.
@@ -773,7 +781,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	ZFSDataSetCompressionInfo *dataset = fileIsCompressable(inFile, inFileInfo, folderinfo,
 															worker? worker->controller() : nullptr);
-	if (!dataset) {
+	if (!dataset || dataset->readOnly) {
 		return;
 	}
 
@@ -880,13 +888,23 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 		ssize_t written;
 		if ((written = write(fdIn, inBuf, filesize)) != filesize) {
-			fprintf(stderr, "%s: Error writing to file (written %ld of %lld bytes; %s)\n",
-					inFile, written, filesize, strerror(errno));
+			fprintf(stderr, "%s: Error writing to file (written %ld of %lld bytes; %d=%s)\n",
+					inFile, written, filesize, errno, strerror(errno));
 			if (backupName) {
 				fprintf(stderr, "\ta backup is available as %s\n", backupName);
 				xfree(backupName);
 			}
 			xclose(fdIn)
+			switch (errno) {
+				case EIO:
+				case EDQUOT:
+				case ENOSPC:
+					if (!dataset->readOnly.exchange(true)) {
+						fprintf(stderr, "Cancelling any future file rewrites on dataset '%s'!\n",
+								dataset->c_str());
+					}
+					break;
+			}
 			goto bail;
 		}
 		fsync(fdIn);
@@ -896,15 +914,19 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	xclose(fdIn);
 
+	if (!testing && (printVerbose > 0 || *folderinfo->z_compression == "off")) {
 #ifndef __APPLE__
-	if (dataset && printVerbose > 0) {
-		if (!testing) {
+		if (dataset) {
 			// don't use ZFSCommandEngine here because it would serialise the compression workers
 			std::string command = "zpool sync \"" + dataset->poolName + "\"";
 			system(command.c_str());
 		}
-	}
+		else
 #endif
+		{
+			sync();
+		}
+	}
 
 	// backup information we still need
 	inFileInfoBak = *inFileInfo;

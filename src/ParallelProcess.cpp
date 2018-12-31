@@ -274,9 +274,9 @@ int ParallelFileProcessor::run()
 			thread->Stop(true);
 		}
 		if( thread->nProcessed ){
+			if( verboseLevel ){
 			fprintf( stderr, "Worker thread #%d processed %ld files",
 					i, thread->nProcessed );
-			if( verboseLevel ){
 				fprintf( stderr, ", %0.2lf Kb [%0.2lf Kb] -> %0.2lf Kb [%0.2lf Kb] (%0.2lf%%)",
 					thread->runningTotalRaw/1024.0, thread->runningTotalRaw/1024.0/thread->nProcessed,
 					thread->runningTotalCompressed/1024.0, thread->runningTotalCompressed/1024.0/thread->nProcessed,
@@ -303,8 +303,8 @@ int ParallelFileProcessor::run()
 #endif
 					}
 				}
+				fputc( '\n', stderr );
 			}
-			fputc( '\n', stderr );
 		}
 		delete thread;
 		threadPool.pop_front();
@@ -494,13 +494,9 @@ static int sizeLess(const FileEntry &a, const FileEntry &b)
 bool sortFilesInParallelProcessorBySize(ParallelFileProcessor *p)
 {
 	if( p && p->itemCount() > 0 ){
-		if( p->verbose() ){
-			fprintf( stderr, "Sorting %lu entries ...", p->itemCount() ); fflush(stderr);
-		}
-		std::sort( p->items().begin(), p->items().end(), sizeLess);
-		if( p->verbose() ){
-			fprintf( stderr, " done\n" );
-		}
+		fprintf(stderr, "Sorting %lu entries ...", p->itemCount()); fflush(stderr);
+		std::sort(p->items().begin(), p->items().end(), sizeLess);
+		fprintf( stderr, " done\n" );
 		return true;
 	}
 	else{

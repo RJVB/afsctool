@@ -247,7 +247,6 @@ public:
 		, bufLen(outputLen)
 		, readlen(-1)
 		, wantOutput(wantOutput)
-	    , active(0)
 	{}
 	~ZFSCommandEngine()
 	{
@@ -278,10 +277,6 @@ protected:
 	DWORD Run(LPVOID)
 	{
 		CRITSECTLOCK::Scope lock(critsect);
-		if (active.fetch_add(1) > 1) { 
-			fprintf(stderr, "%d concurrent ZFS commands (current: %s); this shouldn't happen!\n",
-					active.load(), theCommand.c_str());
-		}
 		buf = new char[bufLen];
 		pid_t child;
 		int ret = -1;
@@ -324,7 +319,6 @@ protected:
 			getOutput(buf, bufLen);
 			error = errno;
 		}
-		active.fetch_sub(1);
 		return ret;
 	}
 	void getOutput(char *buf, size_t bufLen)
@@ -348,7 +342,6 @@ protected:
 	size_t bufLen;
 	int readlen;
 	bool wantOutput;
-	std::atomic_int active;
 public:
 	int error;
 };
@@ -383,10 +376,10 @@ public:
 		// do something relevant here.
 		_setCompression(initialCompression, true, true);
 		delete critsect;
-		if (shuntedDecreases || shuntedIncreases) {
-			fprintf(stderr, "%s: void calls of setCompression() and resetCompression(): %d vs. %d\n",
-					c_str(), int(shuntedIncreases), int(shuntedDecreases));
-		}
+// 		if (shuntedDecreases || shuntedIncreases) {
+// 			fprintf(stderr, "%s: void calls of setCompression() and resetCompression(): %d vs. %d\n",
+// 					c_str(), int(shuntedIncreases), int(shuntedDecreases));
+// 		}
 	}
 
 	// set a new dataset compression. The compresFile() function
@@ -434,9 +427,13 @@ public:
 	{
 		bool ret = false;
 		{
+#ifdef linux
 			std::string command = std::string(testing ? "echo zpool" : "zpool")
 				+ " sync";
 			command += " \"" + poolName + "\"";
+#else
+			std::string command = "sync";
+#endif
 			if (verbose) {
 				fprintf(stderr, "%s\n", command.c_str());
 			}
@@ -922,16 +919,18 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	xclose(fdIn);
 
 	if (!testing && (printVerbose > 0 || *folderinfo->z_compression == "off")) {
-#ifndef __APPLE__
+#ifdef linux
 		if (dataset) {
 			// don't use ZFSCommandEngine here because it would serialise the compression workers
+			// or at least synchronise all of them to the slowest of the lot at each iteration.
+			// Using system() must have a bit of that too, but hopefully less so.
 			std::string command = "zpool sync \"" + dataset->poolName + "\"";
 			system(command.c_str());
 		}
 		else
 #endif
 		{
-			sync();
+			system("sync");
 		}
 	}
 
@@ -1010,7 +1009,7 @@ fail:
 		}
 	}
 
-	// reset the dataset compression (if no other rewrites are ongoing)
+	// reset the dataset compression (if no other rewrites are ongoing on this dataset)
 	if (quickCompressionReset) {
 		dataset->resetCompression();
 	}
@@ -1478,14 +1477,6 @@ next_arg:
 			nReverse = 0;
 		}
 		PP = createParallelProcessor(nJobs, nReverse, printVerbose);
-//		if (PP)
-//		{
-//			if (printVerbose)
-//			{
-//				printf( "Verbose mode switched off in parallel processing mode\n");
-//			}
-//			printVerbose = false;
-//		}
 	}
 
 	// ignore signals due to exceeding CPU or file size limits

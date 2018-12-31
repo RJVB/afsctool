@@ -252,10 +252,10 @@ int ParallelFileProcessor::run()
 			// led to quitRequested() being set and as a result the workers haven't yet
 			// had the chance to exit cleanly. Give them that chance now.
 			fprintf( stderr, " quitting [%ld]...", nProcessing ); fflush(stderr);
-			waitResult = WaitForSingleObject( allDoneEvent, 2000 );
-			for( i = 0 ; i < 4 && waitResult == WAIT_TIMEOUT ; ++i ){
+			waitResult = WaitForSingleObject( allDoneEvent, nProcessing * 500 );
+			for( i = 0 ; i < nProcessing && waitResult == WAIT_TIMEOUT ; ++i ){
 				fprintf( stderr, " [%ld]...", nProcessing) ; fflush(stderr);
-				waitResult = WaitForSingleObject( allDoneEvent, 2000 );
+				waitResult = WaitForSingleObject( allDoneEvent, nProcessing * 500 );
 			}
 		}
 		fputc( '\n', stderr );

@@ -500,6 +500,9 @@ protected:
 					newComp.c_str(), c_str());
 			return false;
 		}
+		if (quitRequested) {
+			verbose = true;
+		}
 		if (currentCompression != newComp) {
 			bool testing = (newComp == "test" || currentCompression == "test");
 			std::string command = std::string(testing ? "echo zfs" : "zfs")

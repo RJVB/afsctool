@@ -233,11 +233,13 @@ int ParallelFileProcessor::run()
 					 if( verboseLevel > 1 ){
 					   double cpuUsage = 0;
 						for( i = 0 ; i < nJobs ; ++i ){
-							if( threadPool[i]->nProcessed ){
+							if( threadPool[i]->nProcessed && threadPool[i]->cpuUsage > 0){
 								cpuUsage += threadPool[i]->cpuUsage / threadPool[i]->nProcessed;
 							}
 						}
-						fprintf( stderr, " [%0.2lf%%]", cpuUsage );
+						if (cpuUsage > 0) {
+							fprintf( stderr, " [%0.2lf%%]", cpuUsage );
+						}
 					 }
 					 fflush(stderr);
 					 prevPerc = perc;
@@ -289,8 +291,15 @@ int ParallelFileProcessor::run()
 #ifdef __MACH__
 						fprintf( stderr, "; %ds slept", thread->threadInfo.sleep_time );
 						if( thread->threadInfo.cpu_usage ){
-							fprintf( stderr, "; %0.2lf%% CPU", thread->threadInfo.cpu_usage / 10.0 );
+							fprintf( stderr, "; %0.2lf%% CPU", thread->threadInfo.cpu_usage * 100.0 / TH_USAGE_SCALE );
 						}
+#elif defined(CLOCK_THREAD_CPUTIME_ID)
+						struct timespec ts;
+						if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != -1) {
+							double rt = ts.tv_sec + ts.tv_nsec * 1e-9;
+							fprintf(stderr, " ; %gs total", rt);
+						}
+						fprintf(stderr, "; %0.2lf%% CPU", thread->cpuUsage);
 #endif
 					}
 				}
@@ -382,18 +391,28 @@ DWORD FileProcessor::Run(LPVOID arg)
 				if( kr == KERN_SUCCESS ){
 					 userTime = info.user_time.seconds + info.user_time.microseconds * 1e-6;
 					 systemTime = info.system_time.seconds + info.system_time.microseconds * 1e-6;
-					 cpuUsage += info.cpu_usage/10.0;
+					 cpuUsage += info.cpu_usage * 100.0 / TH_USAGE_SCALE;
 					 threadInfo = info;
 					 hasInfo = true;
 				}
 				mach_port_deallocate(mach_task_self(), thread);
 #elif defined(linux)
-				struct rusage ru;
-				if (!getrusage(RUSAGE_THREAD, &ru)) {
-					userTime = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec * 1e-6;
-					systemTime = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec * 1e-6;
+				struct rusage rtu;
+				if (!getrusage(RUSAGE_THREAD, &rtu)) {
+					userTime = rtu.ru_utime.tv_sec + rtu.ru_utime.tv_usec * 1e-6;
+					systemTime = rtu.ru_stime.tv_sec + rtu.ru_stime.tv_usec * 1e-6;
 					hasInfo = true;
 				}
+#	ifdef CLOCK_THREAD_CPUTIME_ID
+				struct timespec ts;
+				if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != -1) {
+					double rt = ts.tv_sec + ts.tv_nsec * 1e-9;
+					double t = userTime + systemTime;
+					if (rt) {
+						cpuUsage = t * 100.0 / rt;
+					}
+				}
+#	endif
 #endif
 			}
 		}

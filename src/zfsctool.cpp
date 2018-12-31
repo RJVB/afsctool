@@ -426,6 +426,7 @@ public:
 	bool sync(bool verbose=false, bool testing=false)
 	{
 		bool ret = false;
+		static int active = 0;
 		{
 			std::string command = std::string(testing ? "echo zpool" : "zpool")
 				+ " sync";
@@ -437,6 +438,10 @@ public:
 			// which feels "wrong" in this context.
 			auto worker = new ZFSCommandEngine(command, false);
 			auto startval = worker->Start();
+			active += 1;
+			if (active > 1) { 
+				fprintf(stderr, "%d `zpool sync` workers; this shouldn't happen!\n", active);
+			}
 			if (startval == 0 || worker->isStarted()) {
 				int waitval = worker->Join();
 				DWORD exitval = DWORD(worker->GetExitCode());
@@ -456,6 +461,7 @@ public:
 						command.c_str(), startval, strerror(errno));
 				worker->Join(1000);
 			}
+			active--;
 			delete worker;
 		}
 		return ret;
@@ -643,8 +649,8 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 			&& (S_ISREG(inFileInfo->st_mode) || (folderInfo->follow_sym_links && S_ISLNK(inFileInfo->st_mode)))) {
 		const auto blksize = roundToBlkSize(inFileInfo->st_size, inFileInfo);
 		if (blksize >= (fsInfo.f_bfree * fsInfo.f_bsize) && *folderInfo->z_compression == "off") {
-			fprintf(stderr, "Skipping '%s' because its size %llu >= %llu available space on its dataset.\n",
-					inFile, inFileInfo->st_size, fsInfo.f_bfree * fsInfo.f_bsize);
+			fprintf(stderr, "Skipping '%s' because its size %lu >= %lu available space on its dataset.\n",
+					inFile, (unsigned long)inFileInfo->st_size, (unsigned long)fsInfo.f_bfree * fsInfo.f_bsize);
 			return nullptr;
 		}
 		if (PP && (knownDataSet = PP->z_dataSetForFile(inFile))) {

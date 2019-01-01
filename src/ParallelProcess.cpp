@@ -216,6 +216,7 @@ int ParallelFileProcessor::run()
 	if( nJobs != nRequested ){
 		fprintf( stderr, "Parallel processing with %ld instead of %d threads\n", nJobs, nRequested );
 	}
+	const double startTime = HRTime_Time();
 	for( i = 0 ; i < nJobs ; ++i ){
 		threadPool[i]->Start();
 	}
@@ -231,14 +232,16 @@ int ParallelFileProcessor::run()
 				 if( perc >= prevPerc + 10 ){
 					 fprintf( stderr, "%s %d%%", (prevPerc > 0)? " .." : "", int(perc + 0.5) );
 					 if( verboseLevel > 1 ){
-					   double cpuUsage = 0;
+					   double avCPUUsage = 0;
 						for( i = 0 ; i < nJobs ; ++i ){
-							if( threadPool[i]->nProcessed && threadPool[i]->cpuUsage > 0){
-								cpuUsage += threadPool[i]->cpuUsage / threadPool[i]->nProcessed;
+							if( threadPool[i]->nProcessed && threadPool[i]->avCPUUsage > 0){
+								avCPUUsage += threadPool[i]->avCPUUsage / threadPool[i]->nProcessed;
 							}
 						}
-						if (cpuUsage > 0) {
-							fprintf( stderr, " [%0.2lf%%]", cpuUsage );
+						if (avCPUUsage >= 0) {
+							// we report the combined, not the average CPU time, so N threads
+							// having run at 100% CPU will print as N00% CPU.
+							fprintf( stderr, " [%0.2lf%%]", avCPUUsage );
 						}
 					 }
 					 fflush(stderr);
@@ -263,6 +266,10 @@ int ParallelFileProcessor::run()
 		allDoneEvent = NULL;
 	}
 	i = 0;
+	double totalUTime = 0, totalSTime = 0;
+	// forced verbose mode: prints out statistics even if some aren't meaningful when
+	// verboseLevel==0 (like compression ratios in zfsctool).
+	const bool forcedVerbose = (getenv("VERBOSE") != nullptr);
 	while( !threadPool.empty() ){
 	 FileProcessor *thread = threadPool.front();
 		if( thread->GetExitCode() == (THREAD_RETURN)STILL_ACTIVE ){
@@ -274,8 +281,8 @@ int ParallelFileProcessor::run()
 			thread->Stop(true);
 		}
 		if( thread->nProcessed ){
-			if( verboseLevel ){
-			fprintf( stderr, "Worker thread #%d processed %ld files",
+			if( forcedVerbose || verboseLevel ){
+				fprintf( stderr, "Worker thread #%d processed %ld files",
 					i, thread->nProcessed );
 				fprintf( stderr, ", %0.2lf Kb [%0.2lf Kb] -> %0.2lf Kb [%0.2lf Kb] (%0.2lf%%)",
 					thread->runningTotalRaw/1024.0, thread->runningTotalRaw/1024.0/thread->nProcessed,
@@ -284,23 +291,20 @@ int ParallelFileProcessor::run()
 				if( thread->isBackwards ){
 					fprintf( stderr, " [reverse]");
 				}
-				if( verboseLevel > 1 ){
+				if( forcedVerbose || verboseLevel > 1 ){
 					if( thread->hasInfo ){
 						fprintf( stderr, "\n\t%gs user + %gs system",
 							thread->userTime, thread->systemTime );
+						totalUTime += thread->userTime, totalSTime += thread->systemTime;
 #ifdef __MACH__
 						fprintf( stderr, "; %ds slept", thread->threadInfo.sleep_time );
-						if( thread->threadInfo.cpu_usage ){
-							fprintf( stderr, "; %0.2lf%% CPU", thread->threadInfo.cpu_usage * 100.0 / TH_USAGE_SCALE );
-						}
 #elif defined(CLOCK_THREAD_CPUTIME_ID)
-						struct timespec ts;
-						if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != -1) {
-							double rt = ts.tv_sec + ts.tv_nsec * 1e-9;
-							fprintf(stderr, " ; %gs total", rt);
-						}
-						fprintf(stderr, "; %0.2lf%% CPU", thread->cpuUsage);
+						fprintf(stderr, " ; %gs CPU", thread->cpuTime);
 #endif
+						if (thread->avCPUUsage >= 0) {
+							const auto cu = thread->avCPUUsage / thread->nProcessed;
+							fprintf(stderr, "; %0.2lf%%", cu);
+						}
 					}
 				}
 				fputc( '\n', stderr );
@@ -309,6 +313,12 @@ int ParallelFileProcessor::run()
 		delete thread;
 		threadPool.pop_front();
 		i++;
+	}
+	const double endTime = HRTime_Time();
+	if( forcedVerbose || verboseLevel > 1 ){
+		const double totalCPUUsage = (totalUTime + totalSTime) * 100.0 / (endTime - startTime);
+		fprintf(stderr, "Total %gs user + %gs system; %0.2lf%% CPU\n",
+				totalUTime, totalSTime, totalCPUUsage);
 	}
 	return nProcessed;
 }
@@ -382,7 +392,7 @@ DWORD FileProcessor::Run(LPVOID arg)
 
 			runningTotalRaw += entry.fileInfo.st_size;
 			runningTotalCompressed += (entry.compressedSize > 0)? entry.compressedSize : entry.fileInfo.st_size;
-			if( PP->verbose() > 1 ){
+			/*if( PP->verbose() > 1 )*/{
 #if defined(__MACH__)
                 mach_port_t thread = mach_thread_self();
 				mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
@@ -391,7 +401,7 @@ DWORD FileProcessor::Run(LPVOID arg)
 				if( kr == KERN_SUCCESS ){
 					 userTime = info.user_time.seconds + info.user_time.microseconds * 1e-6;
 					 systemTime = info.system_time.seconds + info.system_time.microseconds * 1e-6;
-					 cpuUsage += info.cpu_usage * 100.0 / TH_USAGE_SCALE;
+					 avCPUUsage += info.cpu_usage * 100.0 / TH_USAGE_SCALE;
 					 threadInfo = info;
 					 hasInfo = true;
 				}
@@ -399,17 +409,19 @@ DWORD FileProcessor::Run(LPVOID arg)
 #elif defined(linux)
 				struct rusage rtu;
 				if (!getrusage(RUSAGE_THREAD, &rtu)) {
-					userTime = rtu.ru_utime.tv_sec + rtu.ru_utime.tv_usec * 1e-6;
-					systemTime = rtu.ru_stime.tv_sec + rtu.ru_stime.tv_usec * 1e-6;
-					hasInfo = true;
+					const auto ut = rtu.ru_utime.tv_sec + rtu.ru_utime.tv_usec * 1e-6;
+					const auto st = rtu.ru_stime.tv_sec + rtu.ru_stime.tv_usec * 1e-6;
+					if (ut >= 0 && st >= 0) {
+						userTime = ut, systemTime = st, hasInfo = true;
+					}
 				}
 #	ifdef CLOCK_THREAD_CPUTIME_ID
 				struct timespec ts;
 				if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != -1) {
-					double rt = ts.tv_sec + ts.tv_nsec * 1e-9;
+					cpuTime = ts.tv_sec + ts.tv_nsec * 1e-9;
 					double t = userTime + systemTime;
-					if (rt) {
-						cpuUsage = t * 100.0 / rt;
+					if (cpuTime > 0) {
+						avCPUUsage += t * 100.0 / cpuTime;
 					}
 				}
 #	endif

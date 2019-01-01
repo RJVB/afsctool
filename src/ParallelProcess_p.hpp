@@ -248,7 +248,7 @@ public:
 		, nProcessed(-1)
 		, runningTotalRaw(0)
 		, runningTotalCompressed(0)
-		, cpuUsage(0.0)
+		, avCPUUsage(0.0)
 		, cleanedUp(false)
 		, isBackwards(isReverse)
 		, procID(procID)
@@ -295,7 +295,7 @@ protected:
 	ParallelFileProcessor *PP;
 	volatile long nProcessed;
 	volatile long long runningTotalRaw, runningTotalCompressed;
-	volatile double cpuUsage, userTime, systemTime;
+	volatile double avCPUUsage, userTime, systemTime;
 	bool cleanedUp;
 	const bool isBackwards;
 	const int procID;
@@ -303,6 +303,8 @@ protected:
 	bool hasInfo;
 #ifdef __MACH__
 	thread_basic_info_data_t threadInfo;
+#elif defined(linux)
+	volatile double cpuTime;
 #endif
 	friend class ParallelFileProcessor;
 private:

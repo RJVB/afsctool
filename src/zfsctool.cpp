@@ -85,6 +85,7 @@ static int ipcPipes[2] = {-1, -1};
 static char ipcPipeWriteEnd[64];
 
 static bool quickCompressionReset = true;
+static bool allowReCompress = false;
 
 char *getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 {
@@ -620,6 +621,7 @@ static bool compressionOk(const iZFSDataSetCompressionInfo *dataset, const struc
 	auto info = dynamic_cast<const ZFSDataSetCompressionInfo*>(dataset);
 	if (info && fi) {
 		return (info->initialCompression != *fi->z_compression)
+			|| allowReCompress
 			|| (st && *fi->z_compression == "off" && st->st_blocks * S_BLKSIZE < st->st_size);
 	}
 	return false;
@@ -914,7 +916,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			}
 			goto bail;
 		}
-		fsync(fdIn);
 	} else {
 		lseek(fdIn, SEEK_SET, 0);
 	}
@@ -1297,11 +1298,12 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 void printUsage()
 {
 	printf("zfsctool %s\n"
-	   "Apply compression to file or folder: zfsctool -c[nlfFvv[v]b] [-q] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-T compressor] file[s]/folder[s]\n\n"
+	   "Apply compression to file or folder: zfsctool -c[nlfFLvv[v]b] [-q] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-T compressor] file[s]/folder[s]\n\n"
 	   "Options:\n"
 	   "-v Increase verbosity level\n"
+	   "-F allow (re)compression to the dataset's current compression type (a.k.a. undo mode)\n"
 	   "-f Detect hard links\n"
-	   "-F follow symbolic links; compress the target if it is a regular file.\n"
+	   "-L follow symbolic links; compress the target if it is a regular file.\n"
 	   "-l List files which fail to compress\n"
 	   "-n Do not verify files after compression (not recommended)\n"
 	   "-m <size> Largest file size to compress, in bytes\n"
@@ -1362,6 +1364,9 @@ int zfsctool(int argc, const char *argv[])
 					hardLinkCheck = TRUE;
 					break;
 				case 'F':
+					allowReCompress = TRUE;
+					break;
+				case 'L':
 					follow_sym_links = TRUE;
 					break;
 				case 'm':

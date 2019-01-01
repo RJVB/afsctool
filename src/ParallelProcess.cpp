@@ -269,7 +269,10 @@ int ParallelFileProcessor::run()
 	double totalUTime = 0, totalSTime = 0;
 	// forced verbose mode: prints out statistics even if some aren't meaningful when
 	// verboseLevel==0 (like compression ratios in zfsctool).
-	const bool forcedVerbose = (getenv("VERBOSE") != nullptr);
+	int verbose = verboseLevel;
+	if (getenv("VERBOSE")) {
+		verbose = atoi(getenv("VERBOSE"));
+	}
 	while( !threadPool.empty() ){
 	 FileProcessor *thread = threadPool.front();
 		if( thread->GetExitCode() == (THREAD_RETURN)STILL_ACTIVE ){
@@ -281,7 +284,7 @@ int ParallelFileProcessor::run()
 			thread->Stop(true);
 		}
 		if( thread->nProcessed ){
-			if( forcedVerbose || verboseLevel ){
+			if( verbose ){
 				fprintf( stderr, "Worker thread #%d processed %ld files",
 					i, thread->nProcessed );
 				fprintf( stderr, ", %0.2lf Kb [%0.2lf Kb] -> %0.2lf Kb [%0.2lf Kb] (%0.2lf%%)",
@@ -291,7 +294,7 @@ int ParallelFileProcessor::run()
 				if( thread->isBackwards ){
 					fprintf( stderr, " [reverse]");
 				}
-				if( forcedVerbose || verboseLevel > 1 ){
+				if( verbose > 1 ){
 					if( thread->hasInfo ){
 						fprintf( stderr, "\n\t%gs user + %gs system",
 							thread->userTime, thread->systemTime );
@@ -315,7 +318,7 @@ int ParallelFileProcessor::run()
 		i++;
 	}
 	const double endTime = HRTime_Time();
-	if( forcedVerbose || verboseLevel > 1 ){
+	if( verbose > 1 ){
 		const double totalCPUUsage = (totalUTime + totalSTime) * 100.0 / (endTime - startTime);
 		fprintf(stderr, "Total %gs user + %gs system; %0.2lf%% CPU\n",
 				totalUTime, totalSTime, totalCPUUsage);

@@ -1,5 +1,5 @@
 // kate: auto-insert-doxygen true; backspace-indents true; indent-width 5; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 5;
-/*!
+/**
  *  @file msemul.h
  *	emulation of multithreading related functions from MS Windows
  *
@@ -74,7 +74,7 @@
 #	define	BOOL		bool
 #endif
 
-/*!
+/**
 	macro defining an infinite timeout wait.
  */
 #define	INFINITE		-1
@@ -104,7 +104,7 @@ typedef void*		PVOID;
 typedef void*		LPVOID;
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
 #	ifndef DWORD
-		/*!
+		/**
 			DWORD is MS's slang for size_t
 		 */
 		typedef size_t	DWORD, *LPDWORD;
@@ -117,7 +117,7 @@ typedef void*		LPVOID;
 
 #	define ZeroMemory(p,s)	memset((p), 0, (s))
 
-	/*!
+	/**
 	 the types of MS Windows HANDLEs that we can emulate:
 	 */
 	typedef enum { MSH_EMPTY, MSH_SEMAPHORE, MSH_MUTEX, MSH_EVENT, MSH_THREAD, MSH_CLOSED } MSHANDLETYPE;
@@ -139,7 +139,7 @@ typedef void*		LPVOID;
 #else
 	typedef struct MSHANDLE*	HANDLE;
 #endif
-	/*!
+	/**
 		Microsoft's semaphore SECURITY_ATTRIBUTES
 	 */
 	typedef struct _SECURITY_ATTRIBUTES {
@@ -147,7 +147,7 @@ typedef void*		LPVOID;
 		LPVOID lpSecurityDescriptor;
 		BOOL   bInheritHandle;
 	} SECURITY_ATTRIBUTES, *PSECURITY_ATTRIBUTES, *LPSECURITY_ATTRIBUTES;
-	/*!
+	/**
 		OpenSemaphore() must be called with dwDesiredAccess==DELETE|SYNCHRONIZE|SEMAPHORE_MODIFY_STATE
 		in order to return an existing named semaphore object on MS Win. This mask is compatible
 		with semaphores created with CreateSemaphore's lpSemaphoreAttributes==NULL or a SECURITY_ATTRIBUTES
@@ -155,7 +155,7 @@ typedef void*		LPVOID;
 	 */
 	enum SEMAPHORE_SECURITY_ATTRMASKS { DELETE=0x00010000L, SYNCHRONIZE=0x00100000L,
 		SEMAPHORE_MODIFY_STATE=0x0002 };
-	/*!
+	/**
 		A structure to keep track of the semaphore's count and Microsoft's maximumCount feature
 		curCount is required because Mac OS X doesn't have a functional sem_getvalue().
 	 */
@@ -164,7 +164,7 @@ typedef void*		LPVOID;
 		unsigned int *refHANDLEp;
 #ifdef __cplusplus
 #	include <new>
-		/*!
+		/**
 		 new() operator that allocates from anonymous shared memory - necessary to be able
 		 to share semaphore handles among processes
 		 */
@@ -178,7 +178,7 @@ typedef void*		LPVOID;
 				throw std::bad_alloc();
 			}
 		}
-		/*!
+		/**
 		 delete operator that frees anonymous shared memory
 		 */
 		void operator delete(void *p)
@@ -193,7 +193,7 @@ typedef void*		LPVOID;
 		}
 #endif
 	} MSHSEMAPHORECOUNTER;
-	/*!
+	/**
 	 an emulated semaphore HANDLE
 	 */
 	typedef struct MSHSEMAPHORE {
@@ -204,7 +204,7 @@ typedef void*		LPVOID;
 		pthread_t owner;
 	} MSHSEMAPHORE;
 
-	/*!
+	/**
 	 an emulated mutex HANDLE
 	 */
 	typedef struct MSHMUTEX {
@@ -220,7 +220,7 @@ typedef void*		LPVOID;
 		long isSignalled;
 	} MSHEVENT;
 
-	/*!
+	/**
 		POSIX threads do not provide a timed join() function, allowing to wait for
 		thread termination for a limited time only. It is possible to implement such a function
 		using thread cancellation; this structure holds the information necessary to do that.
@@ -242,7 +242,7 @@ typedef void*		LPVOID;
 #endif
 	} pthread_timed_t;
 
-	/*!
+	/**
 		an emulated thread HANDLE
 	 */
 	typedef struct MSHTHREAD {
@@ -266,7 +266,7 @@ typedef void*		LPVOID;
 		MSHTHREAD t;
 	} MSHANDLEDATA;
 
-	/*!
+	/**
 		 an emulated HANDLE of one of the supported types (see MSHANDLETYPE)
 		 @n
 		 MS Windows uses the same type for a wealth of things, here we are only concerned
@@ -289,7 +289,7 @@ typedef void*		LPVOID;
 			void Unregister();
 		 public:
 #pragma mark new MSHANDLE
-			/*!
+			/**
 				new() operator that allocates from anonymous shared memory - necessary to be able
 				to share semaphore handles among processes
 			 */
@@ -297,7 +297,7 @@ typedef void*		LPVOID;
 			{ extern void *MSEreallocShared( void* ptr, size_t N, size_t oldN );
 				return MSEreallocShared( NULL, size, 0 );
 			}
-			/*!
+			/**
 				delete operator that frees anonymous shared memory
 			 */
 			void operator delete(void *p)
@@ -305,33 +305,33 @@ typedef void*		LPVOID;
 				MSEfreeShared(p);
 			}
 #pragma mark CreateSemaphore
-			/*!
+			/**
 				initialise a new semaphore HANDLE
 			 */
 			MSHANDLE( void* ign_lpSemaphoreAttributes, long lInitialCount, long lMaximumCount, char *lpName );
 #pragma mark OpenSemaphore
-			/*!
+			/**
 				initialise a new semaphore HANDLE that references an existing semaphore HANDLE
 			 */
 			MSHANDLE( sem_t *sema, MSHSEMAPHORECOUNTER *counter, char *lpName );
 #pragma mark CreateMutex
-			/*!
+			/**
 				initialise a mutex HANDLE
 			 */
 			MSHANDLE( void *ign_lpMutexAttributes, BOOL bInitialOwner, char *ign_lpName );
 #pragma mark CreateEvent
-			/*!
+			/**
 				initialise an event HANDLE
 			 */
 			MSHANDLE( void *ign_lpEventAttributes, BOOL bManualReset, BOOL bInitialState, char *ign_lpName );
 #pragma mark CreateThread
-			/*!
+			/**
 				initialise a thread HANDLE
 			 */
 			MSHANDLE( void *ign_lpThreadAttributes, size_t ign_dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress,
 				    void *lpParameter, DWORD dwCreationFlags, DWORD *lpThreadId );
 #pragma mark initialise a HANDLE from an existing pthread identifier
-			/*!
+			/**
 				Initialise a HANDLE from an existing pthread identifier
 			 */
 			MSHANDLE(pthread_t fromThread);
@@ -340,11 +340,11 @@ typedef void*		LPVOID;
 				throw "MSHANDLE instance copying is undefined";
 			}
 #pragma mark CloseHandle
-			/*!
+			/**
 				HANDLE destructor
 			 */
 			virtual ~MSHANDLE();
-			/*!
+			/**
 				HANDLE string representation (cf. Python's __repr__)
 			 */
 			const std::ostringstream& asStringStream(std::ostringstream& ret) const;
@@ -391,7 +391,7 @@ extern "C" {
 	extern HANDLE OpenSemaphore( DWORD ign_dwDesiredAccess, BOOL ign_bInheritHandle, char *lpName );
 	extern HANDLE CreateMutex( void *ign_lpMutexAttributes, BOOL bInitialOwner, char *ign_lpName );
 	extern HANDLE msCreateEvent( void *ign_lpEventAttributes, BOOL bManualReset, BOOL bInitialState, char *ign_lpName );
-/*!
+/**
 	CreateEvent: macro interface to msCreateEvent.
  */
 #	define CreateEvent(A,R,I,N)	msCreateEvent((A),(R),(I),(N))
@@ -485,7 +485,7 @@ static inline void ExitThread(THREAD_RETURN dwExitCode)
 	pthread_exit((void*) dwExitCode);
 }
 				
-/*!
+/**
  Emulates the Microsoft-specific intrinsic of the same name.
  @n
  compare Destination with Comparand, and replace with Exchange if equal;
@@ -513,7 +513,7 @@ static inline long _InterlockedCompareExchange( volatile long *Destination,
 }
 
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
-/*!
+/**
  Performs an atomic compare-and-exchange operation on the specified values.
  The function compares two specified pointer values and exchanges with another pointer
  value based on the outcome of the comparison.
@@ -608,7 +608,7 @@ static inline void YieldProcessor()
 #endif
 }
 
-/*!
+/**
  millisecond timer
  */
 static inline DWORD GetTickCount()
@@ -633,7 +633,7 @@ static inline void Sleep(DWORD dwMilliseconds)
 
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
 
-/*!
+/**
  Release the given semaphore.
  @n
  @param lReleaseCount	increase the semaphore count by this number (must be > 0)
@@ -681,7 +681,7 @@ static inline bool ReleaseMutex(HANDLE hMutex)
 	return true;
 }
 
-/*!
+/**
 	set the referenced state variable to True in an atomic operation
 	(which avoids changing the state while another thread is reading it)
  */
@@ -694,7 +694,7 @@ static inline void _InterlockedSetTrue( volatile long *atomic )
 	}
 }
 
-/*!
+/**
 	set the referenced state variable to False in an atomic operation
 	(which avoids changing the state while another thread is reading it)
  */

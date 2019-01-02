@@ -1,5 +1,5 @@
 // kate: auto-insert-doxygen true; backspace-indents true; indent-width 5; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 5;
-/*!
+/**
 	@file CritSectEx.h
 	A fast CriticalSection like class with timeout (reimplemented from and) inspired by
 	@n
@@ -177,7 +177,7 @@ static inline void _InterlockedSetFalse( volatile long &atomic )
 #endif //__cplusplus
 
 #ifndef _MSEMUL_H
-/*!
+/**
 	set the referenced state variable to True in an atomic operation
 	(which avoids changing the state while another thread is reading it)
  */
@@ -190,7 +190,7 @@ static inline void _InterlockedSetTrue( volatile long *atomic )
 	}
 }
 
-/*!
+/**
 	set the referenced state variable to False in an atomic operation
 	(which avoids changing the state while another thread is reading it)
  */
@@ -209,7 +209,7 @@ static inline void _InterlockedSetFalse( volatile long *atomic )
 #	define __MUTEXEX_CAN_TIMEOUT__
 #endif
 
-/*!
+/**
 	A critical section class API-compatible with Vladislav Gelfer's CritSectEx
 	This class uses a simple platform-specific mutex except where native mutexes
 	don't provide a timed wait. In that case (OS X), the msemul layer is used to

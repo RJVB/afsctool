@@ -1,7 +1,7 @@
-/*!
+/**
  *  @file timing.c
  *
- *  (C) René J.V. Bertin on 20080926.
+ *  (C) Renï¿½ J.V. Bertin on 20080926.
  *
  *  This code is made available under No License At All
  */

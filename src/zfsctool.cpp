@@ -741,7 +741,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 	return retval ? dynamic_cast<ZFSDataSetCompressionInfo*>(knownDataSet) : nullptr;
 }
 
-/*! Mac OS X basename() can modify the input string when not in 'legacy' mode on 10.6
+/** Mac OS X basename() can modify the input string when not in 'legacy' mode on 10.6
  * and indeed it does. So we use our own which doesn't, and also doesn't require internal
  * storage.
  */

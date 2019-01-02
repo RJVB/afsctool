@@ -1,5 +1,5 @@
 // kate: auto-insert-doxygen true; backspace-indents true; indent-width 4; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 4;
-/*!
+/**
     @file CritSectEx.cpp
     @see CritSectEx.h
     @n

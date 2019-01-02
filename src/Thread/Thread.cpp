@@ -1,5 +1,5 @@
 // kate: auto-insert-doxygen true; backspace-indents true; indent-width 5; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 5;
-/*!
+/**
 	@file Thread.cpp
 	A generic thread class inspired by Arun N Kumar's CThread
 	http://www.codeproject.com/Articles/1570/A-Generic-C-Thread-Class
@@ -54,7 +54,7 @@ Thread::ThreadContext::ThreadContext()
 	m_bExitCodeSet = false;
 }
 
-/*!
+/**
 	lowlevel, internal initialisation
  */
 void Thread::__init__()
@@ -64,7 +64,7 @@ void Thread::__init__()
 	hasBeenStarted = false;
 }
 
-/*!
+/**
  *	Info: Default Constructor
  */
 Thread::Thread()
@@ -73,7 +73,7 @@ Thread::Thread()
 	Detach();
 }
 
-/*!
+/**
  *	Constructor to create a thread that is launched at once but
  *	kept suspended either before or after execution of the InitThread() method.
  */
@@ -88,7 +88,7 @@ Thread::Thread( int when, void* arg )
 	SuspenderThread( (SuspenderThreadTypes)when, arg );
 }
 
-/*!
+/**
  *	Info: Plug Constructor
  *
  *	Use this to migrate/port existing worker threads to objects immediately
@@ -100,7 +100,7 @@ Thread::Thread(LPTHREAD_START_ROUTINE lpExternalRoutine)
 	Attach(lpExternalRoutine);
 }
 
-/*!
+/**
 	initialisation function to convert an already created Thread object
 	into a SuspenderThread instance - BEFORE Start() has been called.
  */
@@ -111,7 +111,7 @@ DWORD Thread::SuspenderThread( SuspenderThreadTypes when, void* arg )
 	return Start(arg);
 }
 
-/*!
+/**
 	initialisation function to convert an already created Thread object
 	into a SuspenderThread instance - BEFORE Start() has been called.
  */
@@ -122,7 +122,7 @@ DWORD Thread::SuspenderThread( int when, void* arg )
 	return Start(arg);
 }
 
-/*!
+/**
 	destructor. Stops the worker thread if it is still running and releases
 	the thread2ThreadKey local storage object if no one is still using it.
  */
@@ -144,7 +144,7 @@ Thread::~Thread()
 	}
 }
 
-/*!
+/**
  *	Info: Starts the thread.
  *	
  *	This function creates and starts the worker thread, passing arg to the worker.
@@ -188,7 +188,7 @@ DWORD Thread::Start( void* arg )
 	return ret;
 }
 
-/*!
+/**
 	unblocks a worker that is suspended or waiting at a synchronisation point
  */
 bool Thread::Continue()
@@ -205,7 +205,7 @@ bool Thread::Continue()
 	return false;
 }
 
-/*!
+/**
 	suspends the worker thread. This can be done at any point
 	in the worker cycle, contrary to blocking at synchronisation
 	which the worker does itself at fixed points. The method returns
@@ -221,7 +221,7 @@ bool Thread::Suspend()
 	return prev;
 }
 
-/*!
+/**
 	join the worker. This is pthread terminology for waiting until
 	the worker thread exits ... either because it is done or because
 	it has received a signal to exit (which Join does NOT give).
@@ -238,7 +238,7 @@ DWORD Thread::Join(DWORD dwMilliSeconds)
 	return ret;
 }
 
-/*!
+/**
 	Stop the worker thread. This call unlocks the worker if it is suspended or waiting
 	at a synchronisation point. Currently this function does not actually stop a still
 	running thread but only sets the threadShouldExit flag unless the ForceKill flag is
@@ -295,7 +295,7 @@ DWORD Thread::Stop( bool bForceKill, DWORD dwForceExitCode )
 	return m_ThreadCtx.m_dwExitCode;
 }
 
-/*!
+/**
 	get the worker's current exit code. This will be STILL_ACTIVE if the
 	thread is still running, or else the exit code specified by the worker.
  */
@@ -310,7 +310,7 @@ THREAD_RETURN Thread::GetExitCode()
 	return (THREAD_RETURN) m_ThreadCtx.m_dwExitCode;
 }
 
-/*!
+/**
 	the cancel callback responsible for calling CleanupThread when the worker
 	is being cancelled
  */
@@ -326,7 +326,7 @@ void WINAPI Thread::HandleCancel()
 	ExitThread((THREAD_RETURN)~STILL_ACTIVE);
 	return;
 }
-/*!
+/**
 	cancel the worker thread, i.e. coerce it through an 'official' exit point
 	rather than killing it outright. Currently implemented on MS Win only.
  */
@@ -373,7 +373,7 @@ bool Thread::Cancel()
 	return ret;
 }
 
-/*!
+/**
 	set the worker exit code/status
  */
 THREAD_RETURN Thread::SetExitCode(THREAD_RETURN dwExitCode)

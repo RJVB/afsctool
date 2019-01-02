@@ -1,5 +1,5 @@
 // kate: auto-insert-doxygen true; backspace-indents true; indent-width 5; keep-extra-spaces true; replace-tabs false; tab-indents true; tab-width 5;
-/*!
+/**
 	@file Thread.hpp
 	A generic thread class inspired by Arun N Kumar's CThread
 	http://www.codeproject.com/Articles/1570/A-Generic-C-Thread-Class
@@ -51,7 +51,7 @@ public:
 	}
 };
 
-/*!
+/**
 	Thread class for easy creation of background worker threads. Standard overridable methods
 	are Run() (the worker function), InitThread() and CleanupThread(). In the default version
 	the worker thread is created and started with the Start() method, after which it runs to
@@ -64,7 +64,7 @@ public:
 class Thread {
 	public:
 #pragma mark new Thread
-		/*!
+		/**
 			new() operator that allocates from anonymous shared memory - necessary to be able
 			to share semaphore handles among processes
 		 */
@@ -78,7 +78,7 @@ class Thread {
 				throw std::bad_alloc();
 			}
 		}
-		/*!
+		/**
 			delete operator that frees anonymous shared memory
 		 */
 		void operator delete(void *p)
@@ -86,7 +86,7 @@ class Thread {
 			MSEfreeShared(p);
 		}
 
-		/*!
+		/**
 		 *	Info: Starts the thread.
 		 *	
 		 *	This function creates and starts the worker thread, passing arg to the worker.
@@ -96,7 +96,7 @@ class Thread {
 		 */
 		DWORD Start( void* arg = NULL );
 
-		/*!
+		/**
 			Return the creator thread's HANDLE. This value is defined only after the thread
 			has been started (i.e. immediately for SuspenderThreads, but after the call to
 			Start() for regular Thread instances).
@@ -106,7 +106,7 @@ class Thread {
 			return m_ThreadCtx.m_hCreator;
 		}
 
-		/*!
+		/**
 			returns true if the worker has been started
 		 */
 		bool isStarted()
@@ -114,7 +114,7 @@ class Thread {
 			return hasBeenStarted;
 		}
 
-		/*!
+		/**
 			returns true if the worker exists and is waiting at a synchronisation point
 			OR is suspended
 		 */
@@ -123,14 +123,14 @@ class Thread {
 			return hasBeenStarted && (startLock.IsLocked() || isSuspended);
 		}
 
-		/*!
+		/**
 			Returns the thread's current priority level
 		 */
 		int ThreadPriority()
 		{
 			return GetThreadPriority(m_ThreadCtx.m_hThread);
 		}
-		/*!
+		/**
 			Returns the thread's current priority level and sets a new level.
 		 */
 		int ThreadPriority(int nPriority)
@@ -138,7 +138,7 @@ class Thread {
 			SetThreadPriority( m_ThreadCtx.m_hThread, nPriority );
 			return ret;
 		}
-		/*!
+		/**
 			Returns the thread's current priority level and sets a new level
 			according to refThread's priority level
 		 */
@@ -149,12 +149,12 @@ class Thread {
 			}
 			return ret;
 		}
-		/*!
+		/**
 			unblocks a worker that is suspended or waiting at a synchronisation point
 		 */
 		bool Continue();
 
-		/*!
+		/**
 			suspends the worker thread. This can be done at any point
 			in the worker cycle, contrary to blocking at synchronisation
 			which the worker does itself at fixed points. The method returns
@@ -162,7 +162,7 @@ class Thread {
 		 */
 		bool Suspend();
 
-		/*!
+		/**
 			join the worker. This is pthread terminology for waiting until
 			the worker thread exits ... either because it is done or because
 			it has received a signal to exit (which Join does NOT give).
@@ -180,7 +180,7 @@ class Thread {
 		//}
 		DWORD Join(DWORD dwMilliSeconds=INFINITE);
 
-		/*!
+		/**
 			Stop the worker thread. This call unlocks the worker if it is suspended or waiting
 			at a synchronisation point. Currently this function does not actually stop a still
 			running thread but only sets the threadShouldExit flag unless the ForceKill flag is
@@ -195,13 +195,13 @@ class Thread {
 		 */
 		DWORD Stop( bool bForceKill=false, DWORD dwForceExitCode=(DWORD)-1 );
 
-		/*!
+		/**
 			get the worker's current exit code. This will be STILL_ACTIVE if the
 			thread is still running, or else the exit code specified by the worker.
 		 */
 		THREAD_RETURN GetExitCode();
 
-		/*!
+		/**
 		 *	Info: Attaches a Thread Function
 		 *	
 		 *	Used primarily for porting but can serve in developing generic thread objects
@@ -210,7 +210,7 @@ class Thread {
 			m_pThreadFunc = lpThreadFunc;
 		}
 
-		/*!
+		/**
 		 *	Info: Detaches the Attached Thread Function
 		 *	
 		 *	Detaches the Attached Thread Function, If any.
@@ -220,12 +220,12 @@ class Thread {
 			m_pThreadFunc = /*Thread::*/EntryPoint; 
 		}
 
-		/*!
+		/**
 		 *	Info: Default Constructor
 		 */
 		Thread();
 
-		/*!
+		/**
 		 *	Constructor to create a thread that is launched at once but
 		 *	kept suspended either before or after execution of the InitThread() method.
 		 */
@@ -240,7 +240,7 @@ class Thread {
 			throw "Thread instance copying is undefined";
 		}
 
-		/*!
+		/**
 		 *	Info: Plug Constructor
 		 *
 		 *	Use this to migrate/port existing worker threads to objects immediately
@@ -248,17 +248,17 @@ class Thread {
 		 */
 		Thread(LPTHREAD_START_ROUTINE lpExternalRoutine);
 
-		/*!
+		/**
 			initialisation function to convert an already created Thread object
 			into a SuspenderThread instance - BEFORE Start() has been called.
 		 */
 		DWORD SuspenderThread( SuspenderThreadTypes when, void* arg = NULL );
-		/*!
+		/**
 			initialisation function to convert an already created Thread object
 			into a SuspenderThread instance - BEFORE Start() has been called.
 		 */
 		DWORD SuspenderThread( int when, void* arg = NULL );
-		/*!
+		/**
 			destructor. Stops the worker thread if it is still running and releases
 			the thread2ThreadKey local storage object if no one is still using it.
 		 */
@@ -266,12 +266,12 @@ class Thread {
 
 	protected:
 
-		/*!
+		/**
 			set the worker exit code/status
 		 */
 		THREAD_RETURN SetExitCode(THREAD_RETURN dwExitCode);
 
-		/*!
+		/**
 			the worker entry point which is responsible for all administrative
 			actions that must be performed from inside the worker thread. It can
 			but should not be overridden.
@@ -314,7 +314,7 @@ class Thread {
 			// return (THREAD_RETURN) STILL_ACTIVE;
 		}
 
-		/*!
+		/**
 		 *	Info: Initialisation function. 
 		 *	
 		 *	Will be called by EntryPoint before executing the thread body.
@@ -324,7 +324,7 @@ class Thread {
 		{
 		}
 
-		/*!
+		/**
 			the actual worker function; override this method.
 		 */
 		virtual DWORD Run( LPVOID /* arg */ )
@@ -332,7 +332,7 @@ class Thread {
 			return m_ThreadCtx.m_dwExitCode;
 		}
 
-		/*!
+		/**
 		 *	Info: Cleanup function. 
 		 *	
 		 *	Will be called by EntryPoint after executing the worker function.
@@ -345,7 +345,8 @@ class Thread {
 
 	private:
 		volatile long m_lCancelling;		//!< flag that is set when the thread is being cancelled
-		/*!
+
+		/**
 			private class that implements the lock used for blocking the worker thread at
 			synchronisation points.
 		 */
@@ -353,7 +354,7 @@ class Thread {
 			HANDLE lockEvent;			//!< the event HANDLE that is the actual lock
 			long isLocked, isNotified;
 			public:
-				/*!
+				/**
 					new() operator that allocates from anonymous shared memory - necessary to be able
 					to share semaphore handles among processes
 				 */
@@ -361,7 +362,7 @@ class Thread {
 				{ extern void *MSEreallocShared( void* ptr, size_t N, size_t oldN );
 					return MSEreallocShared( NULL, size, 0 );
 				}
-				/*!
+				/**
 					delete operator that frees anonymous shared memory
 				 */
 				void operator delete(void *p)
@@ -374,7 +375,7 @@ class Thread {
 				{
 					return isLocked;
 				}
-				/*!
+				/**
 					notify the waiter, i.e. set the event to signalled. isNotified
 					will remain set until the first waiter unlocks.
 				 */
@@ -385,7 +386,7 @@ class Thread {
 					_InterlockedSetTrue(isNotified);
 					return SetEvent(lockEvent);
 				}
-				/*!
+				/**
 					block waiting for the event to be notified. During the wait, isNotified==false
 					and isLocked==true. The function waits on lockEvent for periods up to 0.1s
 					checking isNotified after each wait.
@@ -426,12 +427,12 @@ class Thread {
 		long isSuspended;
 		bool hasBeenStarted;
 
-		/*!
+		/**
 			lowlevel, internal initialisation
 		 */
 		void __init__();
 
-		/*!
+		/**
 		 *	Info: Thread Context Inner Class
 		 *	
 		 *	Every thread object needs to be associated with a set of values.
@@ -446,7 +447,7 @@ class Thread {
 		class ThreadContext
 		{
 			public:
-				/*!
+				/**
 					new() operator that allocates from anonymous shared memory - necessary to be able
 					to share semaphore handles among processes
 				 */
@@ -454,7 +455,7 @@ class Thread {
 				{ extern void *MSEreallocShared( void* ptr, size_t N, size_t oldN );
 					return MSEreallocShared( NULL, size, 0 );
 				}
-				/*!
+				/**
 					delete operator that frees anonymous shared memory
 				 */
 				void operator delete(void *p)
@@ -469,7 +470,7 @@ class Thread {
 //					memset(this, 0, sizeof(this));
 //				}
 
-				/*!
+				/**
 				 *	Attributes Section
 				 */
 			public:
@@ -485,23 +486,23 @@ class Thread {
 				HANDLE m_hCreator;					//!< handle of the creator thread
 		};
 
-		/*!
+		/**
 			the cancel callback responsible for calling CleanupThread when the worker
 			is being cancelled
 		 */
 		static void WINAPI HandleCancel();
 
-		/*!
+		/**
 			cancel the worker thread, i.e. coerce it through an 'official' exit point
 			rather than killing it outright. Currently implemented on MS Win only.
 		 */
 		bool Cancel();
 
-		/*!
+		/**
 		 *	Attributes Section
 		 */
 	protected:
-		/*!
+		/**
 		 *	Info: Members of Thread
 		 */
 		ThreadContext			m_ThreadCtx;			//!<	The Thread Context member
@@ -516,7 +517,7 @@ class Thread {
 
 #pragma mark -------------
 
-/*!
+/**
 	A simple class interface to spawn a function in a Thread. Rather than defining a specific Thread instance
 	for each background process, this interface allows boost::thread like statements like
 	@n
@@ -560,7 +561,7 @@ class BackgroundFunction : public Thread
 				Continue();
 			}
 		}
-		/*!
+		/**
 			quick query of the function result - undefined when the function
 			is still running
 		 */
@@ -568,7 +569,7 @@ class BackgroundFunction : public Thread
 		{
 			return functionResult;
 		}
-		/*!
+		/**
 			Returns true and the function's result value when it is done
 			executing, false otherwise (in which case result is not changed).
 		 */

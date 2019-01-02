@@ -1,4 +1,4 @@
-/*!
+/**
  *  @file msemul4win.h
  *	MSWin glue allowing the emulation of multithreading related functions
  *	from MS Windows on OSX & Linux
@@ -45,7 +45,7 @@ extern "C" {
 #	endif
 #endif
 
-/*!
+/**
 	set the referenced state variable to True in an atomic operation
 	(which avoids changing the state while another thread is reading it)
  */
@@ -58,7 +58,7 @@ static inline void _InterlockedSetTrue( volatile long *atomic )
 	}
 }
 
-/*!
+/**
 	set the referenced state variable to False in an atomic operation
 	(which avoids changing the state while another thread is reading it)
  */

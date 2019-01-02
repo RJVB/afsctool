@@ -34,6 +34,7 @@ public:
 
 	ParallelProcessor()
 	{
+		init_HRTime();
 		listLock = new CRITSECTLOCK(4000);
 		threadLock = new CRITSECTLOCK(4000);
 		quitRequestedFlag = false;

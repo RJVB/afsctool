@@ -325,10 +325,10 @@ int ParallelFileProcessor::run()
 		i++;
 	}
 	const double endTime = HRTime_Time();
-	if( verbose > 1 ){
+	if( verbose > 1 && (totalUTime || totalSTime)){
 		const double totalCPUUsage = (totalUTime + totalSTime) * 100.0 / (endTime - startTime);
-		fprintf(stderr, "Total %gs user + %gs system; %0.2lf%% CPU\n",
-				totalUTime, totalSTime, totalCPUUsage);
+		fprintf(stderr, "Total %gs user + %gs system; %gs total; %0.2lf%% CPU\n",
+				totalUTime, totalSTime, endTime - startTime, totalCPUUsage);
 	}
 	return nProcessed;
 }

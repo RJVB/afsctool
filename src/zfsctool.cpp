@@ -442,7 +442,7 @@ public:
 			// which feels "wrong" in this context.
 			auto worker = new ZFSCommandEngine(command, false);
 			auto startval = worker->Start();
-			if (startval == 0 || worker->isStarted()) {
+			if (startval == 0 || worker->IsStarted()) {
 				int waitval = worker->Join();
 				DWORD exitval = DWORD(worker->GetExitCode());
 				if (waitval || exitval || verbose) {
@@ -522,7 +522,7 @@ protected:
 			// which feels "wrong" in this context.
 			auto worker = new ZFSCommandEngine(command, false);
 			auto startval = worker->Start();
-			if (startval == 0 || worker->isStarted()) {
+			if (startval == 0 || worker->IsStarted()) {
 				int waitval = worker->Join();
 				DWORD exitval = DWORD(worker->GetExitCode());
 				if (waitval || exitval || verbose) {
@@ -696,7 +696,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 			std::string dataSetName;
 			// use 'new' here too.
 			auto worker = new ZFSCommandEngine("zfs list -H -o name,compression,sync \"" + fName + "\"", MAXPATHLEN);
-			if (worker->Start() == 0 || worker->isStarted()) {
+			if (worker->Start() == 0 || worker->IsStarted()) {
 				if (int exitval = worker->Join()) {
 					fprintf(stderr, "\t`%s` returned %d (%s)\n", worker->command().c_str(), exitval, strerror(worker->error));
 				} else {

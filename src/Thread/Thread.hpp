@@ -109,7 +109,7 @@ class Thread {
 		/**
 			returns true if the worker has been started
 		 */
-		bool isStarted()
+		bool IsStarted()
 		{
 			return hasBeenStarted;
 		}

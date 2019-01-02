@@ -62,6 +62,8 @@ void Thread::__init__()
 	suspendOption = THREAD_SUSPEND_NOT;
 	isSuspended = m_lCancelling = threadShouldExit = 0;
 	hasBeenStarted = false;
+	m_ThreadCtx.m_startTime = m_ThreadCtx.m_endTime
+		= m_ThreadCtx.m_waitTime = m_ThreadCtx.m_runTime = -1;
 }
 
 /**
@@ -149,6 +151,7 @@ THREAD_RETURN WINAPI Thread::EntryPoint( LPVOID pArg)
   auto &threadCtx = pParent->m_ThreadCtx;
 
 	threadCtx.m_startTime = HRTime_Time();
+	threadCtx.m_runTime = 0;
 
 	// associate the thread class instance with the thread
 	if( thread2ThreadKey ){
@@ -158,6 +161,9 @@ THREAD_RETURN WINAPI Thread::EntryPoint( LPVOID pArg)
 	}
 
 	pParent->InitThread();
+	threadCtx.m_runTime =
+		HRTime_Time() - threadCtx.m_startTime;
+
 	if( pParent->suspendOption && (pParent->suspendOption & THREAD_SUSPEND_AFTER_INIT) ){
 #if DEBUG > 1
 		fprintf( stderr, "@@%p/%p starting AFTER_INIT suspension\n",
@@ -169,9 +175,13 @@ THREAD_RETURN WINAPI Thread::EntryPoint( LPVOID pArg)
 	} else {
 		threadCtx.m_waitTime = 0;
 	}
+	threadCtx.m_runTime =
+		HRTime_Time() - threadCtx.m_startTime - threadCtx.m_waitTime;
 
 	threadCtx.m_dwExitCode = pParent->Run( threadCtx.m_pUserData );
 	threadCtx.m_bExitCodeSet = true;
+	threadCtx.m_runTime =
+		HRTime_Time() - threadCtx.m_startTime - threadCtx.m_waitTime;
 
 	if( pParent->suspendOption && (pParent->suspendOption & THREAD_SUSPEND_BEFORE_CLEANUP) ){
 #if DEBUG > 1
@@ -182,6 +192,9 @@ THREAD_RETURN WINAPI Thread::EntryPoint( LPVOID pArg)
 		pParent->startLock.Wait();
 		threadCtx.m_waitTime += HRTime_Time() - t1;
 	}
+	threadCtx.m_runTime =
+		HRTime_Time() - threadCtx.m_startTime - threadCtx.m_waitTime;
+
 	pParent->CleanupThread();
 	threadCtx.m_endTime = HRTime_Time();
 	// best estimate for the real time spent running that corresponds to the user+system

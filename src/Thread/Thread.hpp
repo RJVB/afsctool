@@ -124,6 +124,40 @@ class Thread {
 		}
 
 		/**
+		 * thread's start time. Valid only after the thread has been started
+		 */
+		double StartTime()
+		{
+			return m_ThreadCtx.m_startTime;
+		}
+		/**
+		 * thread's "done" time. Valid only after the thread has finished its
+		 * cleanup routine.
+		 */
+		double EndTime()
+		{
+			return m_ThreadCtx.m_endTime;
+		}
+		/**
+		 * thread's time spent waiting in suspension point(s).
+		 * Valid only after the thread has started its payload but can change
+		 * if there's a suspension point before the cleanup phase.
+		 */
+		double WaitTime()
+		{
+			return m_ThreadCtx.m_waitTime;
+		}
+		/**
+		 * thread's total time running until now
+		 * (excluding any time spent waiting in suspension points).
+		 * Valid when StartTime() is.
+		 */
+		double RunningTime()
+		{
+			return m_ThreadCtx.m_runTime;
+		}
+
+		/**
 			Returns the thread's current priority level
 		 */
 		int ThreadPriority()

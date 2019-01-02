@@ -144,6 +144,55 @@ Thread::~Thread()
 	}
 }
 
+THREAD_RETURN WINAPI Thread::EntryPoint( LPVOID pArg)
+{ Thread *pParent = reinterpret_cast<Thread*>(pArg);
+  auto &threadCtx = pParent->m_ThreadCtx;
+
+	threadCtx.m_startTime = HRTime_Time();
+
+	// associate the thread class instance with the thread
+	if( thread2ThreadKey ){
+		TlsSetValue( thread2ThreadKey, pParent );
+		thread2ThreadKeyClients += 1;
+//				fprintf( stderr, "@@ TlsSetValue(%p,%p)\n", thread2ThreadKey, pParent );
+	}
+
+	pParent->InitThread();
+	if( pParent->suspendOption && (pParent->suspendOption & THREAD_SUSPEND_AFTER_INIT) ){
+#if DEBUG > 1
+		fprintf( stderr, "@@%p/%p starting AFTER_INIT suspension\n",
+			    pParent, threadCtx.m_pParent );
+#endif
+		const auto t1 = HRTime_Time();
+		pParent->startLock.Wait();
+		threadCtx.m_waitTime = HRTime_Time() - t1;
+	} else {
+		threadCtx.m_waitTime = 0;
+	}
+
+	threadCtx.m_dwExitCode = pParent->Run( threadCtx.m_pUserData );
+	threadCtx.m_bExitCodeSet = true;
+
+	if( pParent->suspendOption && (pParent->suspendOption & THREAD_SUSPEND_BEFORE_CLEANUP) ){
+#if DEBUG > 1
+		fprintf( stderr, "@@%p/%p starting BEFORE_CLEANUP suspension\n",
+			    pParent, threadCtx.m_pParent );
+#endif
+		const auto t1 = HRTime_Time();
+		pParent->startLock.Wait();
+		threadCtx.m_waitTime += HRTime_Time() - t1;
+	}
+	pParent->CleanupThread();
+	threadCtx.m_endTime = HRTime_Time();
+	// best estimate for the real time spent running that corresponds to the user+system
+	// times obtained via thread_info() or getrusage(RUSAGE_THREAD) on Mach/Unix. This
+	// supposes that the user+system times do not increase significantly while suspended.
+	threadCtx.m_runTime =
+		threadCtx.m_endTime - threadCtx.m_startTime - threadCtx.m_waitTime;
+
+	return (THREAD_RETURN) threadCtx.m_dwExitCode;
+}
+
 /**
  *	Info: Starts the thread.
  *	

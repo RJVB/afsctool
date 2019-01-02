@@ -15,6 +15,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 
 #include "ParallelProcess_p.hpp"
 #include "ParallelProcess.h"
@@ -304,9 +305,15 @@ int ParallelFileProcessor::run()
 #elif defined(CLOCK_THREAD_CPUTIME_ID)
 						fprintf(stderr, " ; %gs CPU", thread->cpuTime);
 #endif
+						const auto acu = thread->avCPUUsage / thread->nProcessed;
 						if (thread->avCPUUsage >= 0) {
-							const auto cu = thread->avCPUUsage / thread->nProcessed;
-							fprintf(stderr, "; %0.2lf%%", cu);
+							fprintf(stderr, "; %0.2lf%%", acu);
+						}
+						if (thread->m_ThreadCtx.m_runTime > 0) {
+							const auto rcu = (thread->userTime + thread->systemTime) * 100.0 / thread->m_ThreadCtx.m_runTime;
+							if (std::fabs(rcu - acu) > 5) {
+								fprintf(stderr, "; %0.2lf%% real", rcu);
+							}
 						}
 					}
 				}
@@ -326,7 +333,7 @@ int ParallelFileProcessor::run()
 	return nProcessed;
 }
 
-int ParallelFileProcessor::workerDone(FileProcessor *worker)
+int ParallelFileProcessor::workerDone(FileProcessor */*worker*/)
 { CRITSECTLOCK::Scope scope(threadLock);
 // 	char name[17];
 // 	pthread_getname_np( (pthread_t) GetThreadId(worker->GetThread()), name, sizeof(name) );
@@ -375,7 +382,7 @@ void ParallelFileProcessor::z_addDataSet(const std::string &fileName, iZFSDataSe
 
 // ================================= FileProcessor methods =================================
 
-DWORD FileProcessor::Run(LPVOID arg)
+DWORD FileProcessor::Run(LPVOID /*arg*/)
 {
 	if( PP ){
 	 FileEntry entry;

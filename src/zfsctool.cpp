@@ -615,7 +615,8 @@ static std::string makeAbsolute(const char *name)
 
 // check if the given dataset doesn't already use the requested new compression 
 // or when z_compression=="off" and the file examined has on-disk size < real size
-// (NB: 
+// TODO: check inFile xattrs for trusted.ZFSCTool:compress key. If it exists (can be read), 
+// use the stored information to decide whether it's OK to (re)compress the file.
 static bool compressionOk(const iZFSDataSetCompressionInfo *dataset, const struct stat *st, const struct folder_info *fi)
 {
 	auto info = dynamic_cast<const ZFSDataSetCompressionInfo*>(dataset);
@@ -1024,8 +1025,14 @@ fail:
 			lsetxattr(inFile, "trusted.ZFSCTool:compress", attrval, strlen(attrval), 0)
 #endif
 		) {
-			fprintf(stderr, "%s: cannot set system.ZFSCTool:compress=%s xattr: %s\n",
+			if (errno != EACCES
+#ifdef EPERM
+				&& errno != EPERM
+#endif
+			) {
+				fprintf(stderr, "%s: cannot set system.ZFSCTool:compress=%s xattr: %s\n",
 					inFile, attrval, strerror(errno));
+			}
 		}
 	}
 

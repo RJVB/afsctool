@@ -1013,6 +1013,22 @@ fail:
 		}
 	}
 
+	if (!testing) {
+		char attrval[8+2+32];
+		snprintf(attrval, sizeof(attrval), "%s@%ld:%ld",
+				 folderinfo->z_compression->c_str(), times[1].tv_sec, times[1].tv_usec);
+		if (
+#ifdef __APPLE__
+			setxattr(inFile, "trusted.ZFSCTool:compress", attrval, strlen(attrval), 0, XATTR_NOFOLLOW | XATTR_CREATE)
+#else
+			lsetxattr(inFile, "trusted.ZFSCTool:compress", attrval, strlen(attrval), 0)
+#endif
+		) {
+			fprintf(stderr, "%s: cannot set system.ZFSCTool:compress=%s xattr: %s\n",
+					inFile, attrval, strerror(errno));
+		}
+	}
+
 	// reset the dataset compression (if no other rewrites are ongoing on this dataset)
 	if (quickCompressionReset) {
 		dataset->resetCompression();

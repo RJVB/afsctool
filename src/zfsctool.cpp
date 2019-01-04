@@ -242,12 +242,25 @@ void split(const std::string &str, std::set<T> &cont, char delim='\t')
 class ZFSCommandEngine : public Thread
 {
 public:
-	ZFSCommandEngine(std::string command, bool wantOutput=true, size_t outputLen=256)
+	typedef enum { COMMAND_OK=0,
+		COMMAND_NOSTART,
+		COMMAND_FAIL,
+		COMMAND_NOOUTPUT } ResultCode;
+	typedef struct {
+		std::string command;
+		std::string output;
+		DWORD exitValue;
+		int error;
+		ResultCode code;
+	} Results;
+
+	ZFSCommandEngine(std::string command, bool wantOutput=true, size_t outputLen=256, int outputTimeout=250)
 		: theCommand(command)
 		, buf(nullptr)
 		, bufLen(outputLen)
 		, readlen(-1)
 		, wantOutput(wantOutput)
+		, pollTimeout(outputTimeout)
 	{}
 	~ZFSCommandEngine()
 	{
@@ -262,6 +275,32 @@ public:
 	std::string& command()
 	{
 		return theCommand;
+	}
+
+	static Results run(std::string command, bool wantOutput=true, size_t outputLen=256, int outputTimeout=250)
+	{
+		errno = 0;
+		auto worker = new ZFSCommandEngine(command, wantOutput, MAXPATHLEN, outputTimeout);
+		Results ret = {worker->theCommand, "", (DWORD)-1, -1, COMMAND_OK};
+		if (worker->Start() == 0 || worker->IsStarted()) {
+			ret.exitValue = worker->Join();
+			ret.error = worker->error;
+			if (ret.exitValue == 0) {
+				if (worker->getOutput().size() > 0) {
+					ret.output = worker->getOutput();
+				} else if (wantOutput) {
+					ret.code = COMMAND_NOOUTPUT;
+				}
+			} else {
+				ret.output = worker->getOutput();
+				ret.code = COMMAND_FAIL;
+			}
+		} else {
+			ret.code = COMMAND_NOSTART;
+			worker->Join(1000);
+		}
+		delete worker;
+		return ret;
 	}
 
 protected:
@@ -289,6 +328,8 @@ protected:
 			ret = system(c.c_str());
 			if (ret == 0) {
 				getOutput(buf, bufLen);
+			} else {
+				getOutput(buf, bufLen, std::max(500, pollTimeout));
 			}
 			error = errno;
 		} else if (child == 0) {
@@ -317,15 +358,19 @@ protected:
 			do {
 				wp = waitpid(child, &ret, 0);
 			} while(wp == -1 && errno == EINTR);
-			getOutput(buf, bufLen);
+			if (ret == 0) {
+				getOutput(buf, bufLen);
+			} else {
+				getOutput(buf, bufLen, std::max(500, pollTimeout));
+			}
 			error = errno;
 		}
 		return ret;
 	}
-	void getOutput(char *buf, size_t bufLen)
+	void getOutput(char *buf, size_t bufLen, int timeout=-1)
 	{
 		struct pollfd fds = { ipcPipes[0], POLLIN, 0 };
-		bool go = wantOutput ? true : (poll(&fds, 1, 250) > 0);
+		bool go = wantOutput ? true : (poll(&fds, 1, (timeout > 0)? timeout : pollTimeout) > 0);
 		if (go) {
 			readlen = read(ipcPipes[0], buf, bufLen);
 			if (readlen > 1 && buf[readlen-1] == '\n') {
@@ -343,6 +388,8 @@ protected:
 	size_t bufLen;
 	int readlen;
 	bool wantOutput;
+	int pollTimeout;
+	std::string errorMsg;
 public:
 	int error;
 };
@@ -440,7 +487,7 @@ public:
 			}
 			// use 'new' because automatic instances tend to get the same address
 			// which feels "wrong" in this context.
-			auto worker = new ZFSCommandEngine(command, false);
+			auto worker = new ZFSCommandEngine(command, false, 256, 10);
 			auto startval = worker->Start();
 			if (startval == 0 || worker->IsStarted()) {
 				int waitval = worker->Join();
@@ -520,7 +567,7 @@ protected:
 			}
 			// use 'new' because automatic instances tend to get the same address
 			// which feels "wrong" in this context.
-			auto worker = new ZFSCommandEngine(command, false);
+			auto worker = new ZFSCommandEngine(command, false, 256, 150);
 			auto startval = worker->Start();
 			if (startval == 0 || worker->IsStarted()) {
 				int waitval = worker->Join();
@@ -617,7 +664,7 @@ static std::string makeAbsolute(const char *name)
 // or when z_compression=="off" and the file examined has on-disk size < real size
 // TODO: check inFile xattrs for trusted.ZFSCTool:compress key. If it exists (can be read), 
 // use the stored information to decide whether it's OK to (re)compress the file.
-static bool compressionOk(const iZFSDataSetCompressionInfo *dataset, const struct stat *st, const struct folder_info *fi)
+static bool compressionOk(const char *inFile, const iZFSDataSetCompressionInfo *dataset, const struct stat *st, const struct folder_info *fi)
 {
 	auto info = dynamic_cast<const ZFSDataSetCompressionInfo*>(dataset);
 	if (info && fi) {
@@ -660,7 +707,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 		if (PP && (knownDataSet = PP->z_dataSetForFile(inFile))) {
 			// file already has a dataset property: OK to compress
 			// if the dataset doesn't already have the requested compression set.
-			return compressionOk(knownDataSet, inFileInfo, folderInfo) ?
+			return compressionOk(inFile, knownDataSet, inFileInfo, folderInfo) ?
 				dynamic_cast<ZFSDataSetCompressionInfo*>(knownDataSet) : nullptr;
 		} else {
 			if (gZFSDataSetCompressionForFSId.count(fsId)) {
@@ -668,7 +715,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 				if (PP) {
 					PP->z_addDataSet(inFile, knownDataSet);
 				}
-				return compressionOk(knownDataSet, inFileInfo, folderInfo) ?
+				return compressionOk(inFile, knownDataSet, inFileInfo, folderInfo) ?
 					dynamic_cast<ZFSDataSetCompressionInfo*>(knownDataSet) : nullptr;
 			}
 			std::string fName;
@@ -696,24 +743,22 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 			// valid dataset mountpoint, or else return an error;
 			std::string dataSetName;
 			// use 'new' here too.
-			auto worker = new ZFSCommandEngine("zfs list -H -o name,compression,sync \"" + fName + "\"", MAXPATHLEN);
-			if (worker->Start() == 0 || worker->IsStarted()) {
-				if (int exitval = worker->Join()) {
-					fprintf(stderr, "\t`%s` returned %d (%s)\n", worker->command().c_str(), exitval, strerror(worker->error));
-				} else {
-					if (worker->getOutput().size() > 0) {
-						dataSetName = worker->getOutput();
-					} else {
-						// terse error because pclose() will probably generate an error
-						fprintf(stderr, "Skipping '%s' because cannot obtain its dataset name\n", inFile);
-					}
-				}
-			} else {
-				fprintf(stderr, "Skipping '%s' because cannot obtain its dataset name; `%s` failed to start (%s)\n",
-						inFile, worker->command().c_str(), strerror(errno));
-				worker->Join(1000);
+			const auto cret = ZFSCommandEngine::run("zfs list -H -o name,compression,sync \"" + fName + "\"", true, MAXPATHLEN);
+			switch (cret.code) {
+				case ZFSCommandEngine::COMMAND_OK:
+					dataSetName = cret.output;
+					break;
+				case ZFSCommandEngine::COMMAND_FAIL:
+					fprintf(stderr, "\t`%s` returned %lu (%s)\n", cret.command.c_str(), cret.exitValue, strerror(cret.error));
+					break;
+				case ZFSCommandEngine::COMMAND_NOOUTPUT:
+					fprintf(stderr, "Skipping '%s' because cannot obtain its dataset name\n", inFile);
+					break;
+				case ZFSCommandEngine::COMMAND_NOSTART:
+					fprintf(stderr, "Skipping '%s' because cannot obtain its dataset name; `%s` failed to start (%s)\n",
+						inFile, cret.command.c_str(), strerror(errno));
+					break;
 			}
-			delete worker;
 			if (!dataSetName.empty()) {
 				// dataSetName will now contain something like "name\tcompression";
 				// split that:
@@ -731,7 +776,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 						// we'll have to deallocate this entry ourselves
 						knownDataSet->setAutoDelete(false);
 					}
-					retval = compressionOk(knownDataSet, inFileInfo, folderInfo);
+					retval = compressionOk(inFile, knownDataSet, inFileInfo, folderInfo);
 				} else {
 					fprintf(stderr, "Skipping '%s' because '%s' parses to %lu items\n",
 							inFile, dataSetName.c_str(), properties.size());
@@ -1724,5 +1769,27 @@ int main (int argc, const char * argv[])
         }
     }
 #endif
+// 		init_HRTime();
+// 		double dt = 0;
+// 		int i;
+// 		for (i = 0 ; i < 20 ; ++i ){
+// 			HRTime_tic();
+// 			const auto cret = ZFSCommandEngine::run("sleep 2", false, 256, 0);
+// 			switch (cret.code) {
+// 				case ZFSCommandEngine::COMMAND_OK:
+// 					if (cret.output.size() > 0) {
+// 						fprintf(stderr, "`%s` -> %s", cret.command.c_str(), cret.output.c_str());
+// 					}
+// 					break;
+// 				case ZFSCommandEngine::COMMAND_FAIL:
+// 					fprintf(stderr, "`%s` returned %lu (%s)\n", cret.command.c_str(), cret.exitValue, strerror(cret.error));
+// 					break;
+// 				case ZFSCommandEngine::COMMAND_NOSTART:
+// 					fprintf(stderr, "`%s` failed to start (%s)\n", cret.command.c_str(), strerror(errno));
+// 					break;
+// 			}
+// 			dt += HRTime_toc();
+// 		}
+// 		fprintf( stderr, "av. `sleep 2` time: %gs\n", dt / i);
     return zfsctool(argc, argv);
 }

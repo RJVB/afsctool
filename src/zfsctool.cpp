@@ -87,6 +87,8 @@ static char ipcPipeWriteEnd[64];
 static bool quickCompressionReset = true;
 static bool allowReCompress = false;
 
+static const char *XATTR_ZFSCOMPPROP_NAME = "trusted.ZFSCTool:compress";
+
 char *getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 {
 	static char sizeStr[128];
@@ -209,23 +211,36 @@ static void signal_handler(int sig)
 
 // from http://www.martinbroadhurst.com/how-to-split-a-string-in-c.html:
 template <class Container>
-void split(const std::string &str, Container &cont, char delim='\t')
-{
-    std::stringstream ss(str);
-    std::string token;
-    while (std::getline(ss, token, delim)) {
-        cont.push_back(token);
-    }
+void split( const std::string &str, Container &cont, char delim = '\t' ) {
+	std::stringstream ss( str );
+	std::string token;
+	while( std::getline( ss, token, delim ) ) {
+		cont.push_back( token );
+	}
 }
 
 template <typename T>
-void split(const std::string &str, std::set<T> &cont, char delim='\t')
-{
-    std::stringstream ss(str);
-    std::string token;
-    while (std::getline(ss, token, delim)) {
-        cont.insert(token);
-    }
+void split( const std::string &str, std::set<T> &cont, char delim = '\t' ) {
+	std::stringstream ss( str );
+	std::string token;
+	while( std::getline( ss, token, delim ) ) {
+		cont.insert( token );
+	}
+}
+
+template <class Container>
+void split( const std::string &str, Container &cont, std::vector<char> delims ) {
+	std::stringstream ss( str );
+	std::string token;
+	int i = 1;
+	const auto nDelims = delims.size();
+	char delim = delims[0];
+	while( std::getline( ss, token, delim ) ) {
+		cont.push_back( token );
+		if (i < nDelims) {
+			delim = delims[i++];
+		}
+	}
 }
 
 // https://stackoverflow.com/questions/28803252/c-printing-or-cout-a-standard-library-container-to-console
@@ -660,14 +675,51 @@ static std::string makeAbsolute(const char *name)
 	return absName;
 }
 
+ssize_t _getxattr(const char *path, const char *name, void *value, size_t size, int options, bool followLinks)
+{
+#ifdef __APPLE__
+	return getxattr(path, name, value, size, 0, followLinks ? options : options | XATTR_NOFOLLOW);
+#else
+	if (followLinks) {
+		return getxattr(path, name, value, size, options);
+	} else {
+		return lgetxattr(path, name, value, size, options);
+	}
+#endif
+}
+
 // check if the given dataset doesn't already use the requested new compression 
 // or when z_compression=="off" and the file examined has on-disk size < real size
 // TODO: check inFile xattrs for trusted.ZFSCTool:compress key. If it exists (can be read), 
 // use the stored information to decide whether it's OK to (re)compress the file.
-static bool compressionOk(const char *inFile, const iZFSDataSetCompressionInfo *dataset, const struct stat *st, const struct folder_info *fi)
+static bool compressionOk(const char *inFile, const iZFSDataSetCompressionInfo *dataset, const struct stat *st,
+						  const struct folder_info *fi)
 {
 	auto info = dynamic_cast<const ZFSDataSetCompressionInfo*>(dataset);
 	if (info && fi) {
+		if (inFile) {
+			const auto attrLen = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, nullptr, 0, 0, fi->follow_sym_links);
+			if (attrLen > 0) {
+				std::string value(attrLen, 0);
+				const auto l2 = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, (void*) value.c_str(), attrLen, 0, fi->follow_sym_links);
+				std::vector<std::string> attrs;
+				split(value, attrs, {'@', ':'});
+				if (l2 == attrLen && attrs.size() == 3) {
+					struct timeval mtime;
+#if defined(__APPLE__)
+					mtime.tv_sec = st->st_mtimespec.tv_sec;
+					mtime.tv_usec = st->st_mtimespec.tv_nsec / 1000;
+#elif defined(linux)
+					mtime.tv_sec = st->st_mtim.tv_sec;
+					mtime.tv_usec = st->st_mtim.tv_nsec / 1000;
+#endif
+					return attrs[0] != *fi->z_compression
+						|| allowReCompress
+						|| stoul(attrs[1]) != mtime.tv_sec
+						|| stoul(attrs[2]) != mtime.tv_usec;
+				}
+			}
+		}
 		return (info->initialCompression != *fi->z_compression)
 			|| allowReCompress
 			|| (st && *fi->z_compression == "off" && st->st_blocks * S_BLKSIZE < st->st_size);
@@ -1062,12 +1114,12 @@ fail:
 	if (!testing) {
 		char attrval[8+2+32];
 		snprintf(attrval, sizeof(attrval), "%s@%ld:%ld",
-				 folderinfo->z_compression->c_str(), times[1].tv_sec, times[1].tv_usec);
+				 folderinfo->z_compression->c_str(), (long)times[1].tv_sec, (long)times[1].tv_usec);
 		if (
 #ifdef __APPLE__
-			setxattr(inFile, "trusted.ZFSCTool:compress", attrval, strlen(attrval), 0, XATTR_NOFOLLOW | XATTR_CREATE)
+			setxattr(inFile, XATTR_ZFSCOMPPROP_NAME, attrval, strlen(attrval), 0, XATTR_NOFOLLOW)
 #else
-			lsetxattr(inFile, "trusted.ZFSCTool:compress", attrval, strlen(attrval), 0)
+			lsetxattr(inFile, XATTR_ZFSCOMPPROP_NAME, attrval, strlen(attrval), 0)
 #endif
 		) {
 			if (errno != EACCES
@@ -1075,8 +1127,8 @@ fail:
 				&& errno != EPERM
 #endif
 			) {
-				fprintf(stderr, "%s: cannot set system.ZFSCTool:compress=%s xattr: %s\n",
-					inFile, attrval, strerror(errno));
+				fprintf(stderr, "%s: cannot set %s=%s xattr: %s\n",
+					inFile, XATTR_ZFSCOMPPROP_NAME, attrval, strerror(errno));
 			}
 		}
 	}

@@ -675,15 +675,15 @@ static std::string makeAbsolute(const char *name)
 	return absName;
 }
 
-ssize_t _getxattr(const char *path, const char *name, void *value, size_t size, int options, bool followLinks)
+ssize_t _getxattr(const char *path, const char *name, void *value, size_t size, bool followLinks)
 {
 #ifdef __APPLE__
-	return getxattr(path, name, value, size, 0, followLinks ? options : options | XATTR_NOFOLLOW);
+	return getxattr(path, name, value, size, 0, followLinks ? 0 : XATTR_NOFOLLOW);
 #else
 	if (followLinks) {
-		return getxattr(path, name, value, size, options);
+		return getxattr(path, name, value, size);
 	} else {
-		return lgetxattr(path, name, value, size, options);
+		return lgetxattr(path, name, value, size);
 	}
 #endif
 }
@@ -698,10 +698,10 @@ static bool compressionOk(const char *inFile, const iZFSDataSetCompressionInfo *
 	auto info = dynamic_cast<const ZFSDataSetCompressionInfo*>(dataset);
 	if (info && fi) {
 		if (inFile) {
-			const auto attrLen = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, nullptr, 0, 0, fi->follow_sym_links);
+			const auto attrLen = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, nullptr, 0, fi->follow_sym_links);
 			if (attrLen > 0) {
 				std::string value(attrLen, 0);
-				const auto l2 = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, (void*) value.c_str(), attrLen, 0, fi->follow_sym_links);
+				const auto l2 = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, (void*) value.c_str(), attrLen, fi->follow_sym_links);
 				std::vector<std::string> attrs;
 				split(value, attrs, {'@', ':'});
 				if (l2 == attrLen && attrs.size() == 3) {

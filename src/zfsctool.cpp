@@ -690,8 +690,8 @@ ssize_t _getxattr(const char *path, const char *name, void *value, size_t size, 
 
 // check if the given dataset doesn't already use the requested new compression 
 // or when z_compression=="off" and the file examined has on-disk size < real size
-// TODO: check inFile xattrs for trusted.ZFSCTool:compress key. If it exists (can be read), 
-// use the stored information to decide whether it's OK to (re)compress the file.
+// Do this after checking inFile xattrs for trusted.ZFSCTool:compress key. If it exists (can be read), 
+// use that stored information to decide whether it's OK to (re)compress the file.
 static bool compressionOk(const char *inFile, const iZFSDataSetCompressionInfo *dataset, const struct stat *st,
 						  const struct folder_info *fi)
 {
@@ -705,6 +705,8 @@ static bool compressionOk(const char *inFile, const iZFSDataSetCompressionInfo *
 				std::vector<std::string> attrs;
 				split(value, attrs, {'@', ':'});
 				if (l2 == attrLen && attrs.size() == 3) {
+					// xattr exists and has the right format:
+					// compression@modtime_secs:modtime_microsecs
 					struct timeval mtime;
 #if defined(__APPLE__)
 					mtime.tv_sec = st->st_mtimespec.tv_sec;

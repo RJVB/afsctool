@@ -122,3 +122,4 @@ There is not currently an API provided by the ZFS libraries which allow getting 
 compression property so I use the `zfs` driver command and parse its output (striving very hard
 to call the command as little as possible; once per dataset during the file collection phase).
 As a bonus, `zfsctool` only has a runtime dependency on ZFS.
+See https://openzfsonosx.org/forum/viewtopic.php?p=9287#p9287

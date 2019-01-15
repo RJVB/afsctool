@@ -3219,6 +3219,7 @@ next_arg:;
 					memcpy(fi, &folderinfo, sizeof(*fi));
 // 					reset certain fields
 					fi->num_files = 0;
+					fi->num_compressed = 0;
 					fi->uncompressed_size = fi->uncompressed_size_rounded = 0;
 					fi->compressed_size = fi->compressed_size_rounded = 0;
 					fi->total_size = 0;

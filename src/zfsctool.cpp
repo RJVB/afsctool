@@ -243,6 +243,21 @@ void split( const std::string &str, Container &cont, std::vector<char> delims ) 
 	}
 }
 
+template <class Container>
+void split( const std::string &str, Container *cont, std::vector<char> delims ) {
+	std::stringstream ss( str );
+	std::string token;
+	int i = 1;
+	const auto nDelims = delims.size();
+	char delim = delims[0];
+	while( std::getline( ss, token, delim ) ) {
+		cont->push_back( token );
+		if (i < nDelims) {
+			delim = delims[i++];
+		}
+	}
+}
+
 // https://stackoverflow.com/questions/28803252/c-printing-or-cout-a-standard-library-container-to-console
 // this is a simpler version of functionality provided through prettyprint.hpp but works only for std containers
 // template <class container>
@@ -410,28 +425,31 @@ public:
 };
 CRITSECTLOCK ZFSCommandEngine::critsect(4000);
 
+typedef std::vector<std::string> StringVector;
+
 class ZFSDataSetCompressionInfo : public iZFSDataSetCompressionInfo
 {
 public:
-	ZFSDataSetCompressionInfo(const char *name, const char *compression, const char *sync)
+	ZFSDataSetCompressionInfo(const char *name, const char *compression, const char *sync, const char *copies)
 		: iZFSDataSetCompressionInfo(name, compression)
 		, initialCompression(compression)
 		, currentCompression(compression)
 		, initialSync(sync)
+		, initialCopies(copies)
 		, readOnly(false)
 		, critsect(new CRITSECTLOCK(4000))
 		, refcount(0)
 		, shuntedIncreases(0)
 		, shuntedDecreases(0)
 	{
-		std::vector<std::string> components;
+		StringVector components;
 		split(*this, components, '/');
 		poolName = components[0];
-		fprintf(stderr, "dataset '%s' of pool '%s' has compression '%s' and sync=%s\n",
-				name, poolName.c_str(), compression, sync);
+		fprintf(stderr, "dataset '%s' of pool '%s' has compression '%s', copies=%s and sync=%s\n",
+				name, poolName.c_str(), compression, copies, sync);
 	}
-	ZFSDataSetCompressionInfo(std::vector<std::string>props)
-		: ZFSDataSetCompressionInfo(props[0].c_str(), props[1].c_str(), props[2].c_str())
+	ZFSDataSetCompressionInfo(const StringVector &props)
+		: ZFSDataSetCompressionInfo(props[0].c_str(), props[1].c_str(), props[2].c_str(), props[3].c_str())
 	{}
 
 	virtual ~ZFSDataSetCompressionInfo()
@@ -531,6 +549,7 @@ public:
 	std::string poolName;
 	std::string initialCompression, currentCompression;
 	std::string initialSync;
+	std::string initialCopies;
 	std::atomic_bool readOnly;
 
 // 	template <typename CharT, typename Traits>
@@ -688,6 +707,55 @@ ssize_t _getxattr(const char *path, const char *name, void *value, size_t size, 
 #endif
 }
 
+std::unique_ptr<StringVector> getZFSCompAttr(const char *inFile, bool followSymLinks, bool debug=false)
+{
+	const auto attrLen = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, nullptr, 0, followSymLinks);
+	auto attrs = std::unique_ptr<StringVector>(new StringVector);
+	if (attrLen > 0) {
+		std::string value(attrLen, 0);
+		const auto l2 = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, (void*) value.c_str(), attrLen, followSymLinks);
+		if (debug) {
+			fprintf(stderr, " {'%s': '%s'[%ld:%ld]} ", inFile, value.c_str(), l2, attrLen);
+		}
+		if (l2 == attrLen) {
+			split(value, attrs.get(), {'@', ':'});
+			if (attrs->size() == 3) {
+				return attrs;
+			}
+		}
+	} else if (debug) {
+		fprintf(stderr, " {'%s': attrlen=%ld, followSymLinks=%d (%s)} ", inFile, attrLen, followSymLinks, strerror(errno));
+	}
+	attrs->clear();
+	return attrs;
+}
+
+/**
+ * Check if the XATTR_ZFSCOMPPROP_NAME is up-to-date and does NOT contain @a compression
+ * Returns -1 if the attribute is not set or corrupt, else a boolean corresponding to the
+ * check above.
+ */
+int checkValidZFSCompAttrAgainst(const char *inFile, const struct stat *st, const std::string &compression, bool followSymLinks)
+{
+	auto attrs = getZFSCompAttr(inFile, followSymLinks);
+	if (attrs->size() == 3) {
+		// xattr exists and has the right format:
+		// compression@modtime_secs:modtime_microsecs
+		struct timeval mtime;
+#if defined(__APPLE__)
+		mtime.tv_sec = st->st_mtimespec.tv_sec;
+		mtime.tv_usec = st->st_mtimespec.tv_nsec / 1000;
+#elif defined(linux)
+		mtime.tv_sec = st->st_mtim.tv_sec;
+		mtime.tv_usec = st->st_mtim.tv_nsec / 1000;
+#endif
+		return (*attrs)[0] != compression
+			|| stoul((*attrs)[1]) != mtime.tv_sec
+			|| stoul((*attrs)[2]) != mtime.tv_usec;
+	}
+	return -1;
+}
+
 // check if the given dataset doesn't already use the requested new compression 
 // or when z_compression=="off" and the file examined has on-disk size < real size
 // Do this after checking inFile xattrs for trusted.ZFSCTool:compress key. If it exists (can be read), 
@@ -698,28 +766,9 @@ static bool compressionOk(const char *inFile, const iZFSDataSetCompressionInfo *
 	auto info = dynamic_cast<const ZFSDataSetCompressionInfo*>(dataset);
 	if (info && fi) {
 		if (inFile) {
-			const auto attrLen = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, nullptr, 0, fi->follow_sym_links);
-			if (attrLen > 0) {
-				std::string value(attrLen, 0);
-				const auto l2 = _getxattr(inFile, XATTR_ZFSCOMPPROP_NAME, (void*) value.c_str(), attrLen, fi->follow_sym_links);
-				std::vector<std::string> attrs;
-				split(value, attrs, {'@', ':'});
-				if (l2 == attrLen && attrs.size() == 3) {
-					// xattr exists and has the right format:
-					// compression@modtime_secs:modtime_microsecs
-					struct timeval mtime;
-#if defined(__APPLE__)
-					mtime.tv_sec = st->st_mtimespec.tv_sec;
-					mtime.tv_usec = st->st_mtimespec.tv_nsec / 1000;
-#elif defined(linux)
-					mtime.tv_sec = st->st_mtim.tv_sec;
-					mtime.tv_usec = st->st_mtim.tv_nsec / 1000;
-#endif
-					return attrs[0] != *fi->z_compression
-						|| allowReCompress
-						|| stoul(attrs[1]) != mtime.tv_sec
-						|| stoul(attrs[2]) != mtime.tv_usec;
-				}
+			auto ret = checkValidZFSCompAttrAgainst(inFile, st, *fi->z_compression, fi->follow_sym_links);
+			if (ret >= 0) {
+				return ret || allowReCompress;
 			}
 		}
 		return (info->initialCompression != *fi->z_compression)
@@ -797,7 +846,7 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 			// valid dataset mountpoint, or else return an error;
 			std::string dataSetName;
 			// use 'new' here too.
-			const auto cret = ZFSCommandEngine::run("zfs list -H -o name,compression,sync \"" + fName + "\"", true, MAXPATHLEN);
+			const auto cret = ZFSCommandEngine::run("zfs list -H -o name,compression,sync,copies \"" + fName + "\"", true, MAXPATHLEN);
 			switch (cret.code) {
 				case ZFSCommandEngine::COMMAND_OK:
 					dataSetName = cret.output;
@@ -816,9 +865,9 @@ static ZFSDataSetCompressionInfo *fileIsCompressable(const char *inFile,
 			if (!dataSetName.empty()) {
 				// dataSetName will now contain something like "name\tcompression";
 				// split that:
-				std::vector<std::string> properties;
+				StringVector properties;
 				split(dataSetName, properties);
-				if (properties.size() == 3) {
+				if (properties.size() == 4) {
 					if (PP) {
 						knownDataSet = PP->z_dataSet(properties[0]);
 						auto unknownDataSet = knownDataSet? knownDataSet : new ZFSDataSetCompressionInfo(properties);
@@ -1305,7 +1354,31 @@ long long process_file_info(const char *filepath, const char* /*filetype*/, stru
 		return 0;
 	}
 
+	const auto sizeInBlocks = fileinfo->st_blocks * S_BLKSIZE;
+	bool isCompressed;
+
 	folderinfo->num_files++;
+	if (checkValidZFSCompAttrAgainst(filepath, fileinfo, "off", folderinfo->follow_sym_links) > 0
+			|| sizeInBlocks < fileinfo->st_size) {
+		// we know the file is compressed, or it's smaller on disk than in bytes
+		isCompressed = true;
+		folderinfo->num_compressed++;
+	} else {
+		isCompressed = false;
+		if (printVerbose > 2
+#ifdef linux
+			&& geteuid() == 0
+#endif
+		) {
+			// feedback, but only if we have permissions to read the XATTR
+			fprintf(stderr, " [%s not known to be compressed {", filepath);
+			auto attrs = getZFSCompAttr(filepath, folderinfo->follow_sym_links, true);
+			for (const auto a : *attrs) {
+				std::cerr << " " << a;
+			}
+			fputs("}] ", stderr);
+		}
+	}
 
 	if (folderinfo->print_files) {
 		if (folderinfo->print_info > 1) {
@@ -1313,8 +1386,12 @@ long long process_file_info(const char *filepath, const char* /*filetype*/, stru
 			filesize = fileinfo->st_size;
 			printf("File size (real): %s\n", getSizeStr(filesize, filesize, 1));
 			// on-disk file size:
-			filesize = fileinfo->st_blocks * S_BLKSIZE;
-			printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
+			filesize = sizeInBlocks;
+			if (isCompressed) {
+				printf("Compression savings: %0.1f%%\n", (1.0 - (((double) filesize) / fileinfo->st_size)) * 100.0);
+			} else {
+				printf("Filesystem overhead: %0.1f%%\n", (1.0 - (((double) fileinfo->st_size) / filesize)) * 100.0);
+			}
 		} else if (!folderinfo->compress_files) {
 			printf("%s\n", filepath);
 		}
@@ -1324,12 +1401,11 @@ long long process_file_info(const char *filepath, const char* /*filetype*/, stru
 	filesize_rounded = roundToBlkSize(filesize, fileinfo);
 	folderinfo->uncompressed_size += filesize;
 	folderinfo->uncompressed_size_rounded += filesize_rounded;
-	ret = filesize = fileinfo->st_blocks * S_BLKSIZE;
+	ret = filesize = sizeInBlocks;
 	filesize_rounded = roundToBlkSize(filesize, fileinfo);
 	folderinfo->compressed_size += filesize;
 	folderinfo->compressed_size_rounded += filesize_rounded;
 	folderinfo->total_size += filesize;
-	folderinfo->num_compressed++;
 	return ret;
 }
 
@@ -1355,7 +1431,12 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 	foldersize = folderinfo->compressed_size;
 	foldersize_rounded = folderinfo->compressed_size_rounded;
 	printf("Folder size (on disk): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
-	printf("Compression savings: %0.1f%%\n", (1.0 - ((float)(folderinfo->compressed_size) / folderinfo->uncompressed_size)) * 100.0);
+	printf("On-disk savings: %0.1f%%",
+		   (1.0 - ((float)(folderinfo->compressed_size) / folderinfo->uncompressed_size)) * 100.0);
+	if (folderinfo->num_compressed > 0) {
+		printf(" (%lld files are known to be compressed)", folderinfo->num_compressed);
+	}
+	fputs("\n", stdout);
 	foldersize = folderinfo->total_size;
 	printf("Approximate total folder size (files + file overhead + folder overhead): %s\n",
 		   getSizeStr(foldersize, foldersize, 0));
@@ -1742,6 +1823,7 @@ next_arg:
 					memcpy(fi, &folderinfo, sizeof(*fi));
 // 					reset certain fields
 					fi->num_files = 0;
+					fi->num_compressed = 0;
 					fi->uncompressed_size = fi->uncompressed_size_rounded = 0;
 					fi->compressed_size = fi->compressed_size_rounded = 0;
 					fi->total_size = 0;

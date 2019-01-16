@@ -12,6 +12,11 @@
 #endif
 #endif
 
+#define _LARGEFILE_SOURCE
+#define _LARGEFILE64_SOURCE
+#define __USE_LARGEFILE64
+#define __USE_FILE_OFFSET64
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -978,7 +983,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	bool locked = false;
 	// use open() with an exclusive lock so no one can modify the file while we're at it
 	// open RO in testing mode
+#ifdef linux
+	int fdIn = testing ? open64(inFile, O_RDONLY | O_EXLOCK) : open64(inFile, O_RDWR | O_EXLOCK);
+#else
 	int fdIn = testing ? open(inFile, O_RDONLY | O_EXLOCK) : open(inFile, O_RDWR | O_EXLOCK);
+#endif
 	if (fdIn == -1) {
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
 		goto bail;
@@ -991,12 +1000,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		return;
 	}
 	madvise(inBuf, filesize, MADV_SEQUENTIAL);
-	if (read(fdIn, inBuf, filesize) != filesize) {
-		fprintf(stderr, "%s: Error reading file (%s)\n", inFile, strerror(errno));
-		xclose(fdIn);
-		utimes(inFile, times);
-		free(inBuf);
-		return;
+	{
+		const ssize_t inRead = pread(fdIn, inBuf, filesize, 0);
+		if (inRead != filesize) {
+			fprintf(stderr, "%s: Error reading file; read %lld of %lld bytes (%s)\n",
+					inFile, inRead, filesize, strerror(errno));
+			xclose(fdIn);
+			utimes(inFile, times);
+			free(inBuf);
+			return;
+		}
 	}
 
 	// keep our filedescriptor open to maintain the lock!
@@ -1131,7 +1144,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			madvise(outBuf, filesize, MADV_SEQUENTIAL);
 			if (!outBufMMapped) {
 				errno = 0;
-				readFailure = (checkRead = read(fdIn, outBuf, filesize)) != filesize;
+				readFailure = (checkRead = pread64(fdIn, outBuf, filesize, 0)) != filesize;
 			} else {
 				readFailure = false;
 				checkRead = filesize;

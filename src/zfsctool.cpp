@@ -955,15 +955,17 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		return;
 	}
 
-	if (filesize > maxSize && maxSize != 0) {
-		if (folderinfo->print_info > 2) {
-			fprintf(stderr, "Skipping file %s size %lld > max size %lld\n", inFile, filesize, maxSize);
-		}
-		return;
-	}
 	if (filesize == 0) {
 		if (folderinfo->print_info > 2) {
 			fprintf(stderr, "Skipping empty file %s\n", inFile);
+		}
+		return;
+	} else if (filesize > (1 << 31)) {
+		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
+		return;
+	} else if (filesize > maxSize && maxSize != 0) {
+		if (folderinfo->print_info > 2) {
+			fprintf(stderr, "Skipping file %s size %lld > max size %lld\n", inFile, filesize, maxSize);
 		}
 		return;
 	}
@@ -1001,7 +1003,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 	madvise(inBuf, filesize, MADV_SEQUENTIAL);
 	{
-		const ssize_t inRead = pread(fdIn, inBuf, filesize, 0);
+		const ssize_t inRead = read(fdIn, inBuf, filesize);
 		if (inRead != filesize) {
 			fprintf(stderr, "%s: Error reading file; read %lld of %lld bytes (%s)\n",
 					inFile, inRead, filesize, strerror(errno));
@@ -1144,7 +1146,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			madvise(outBuf, filesize, MADV_SEQUENTIAL);
 			if (!outBufMMapped) {
 				errno = 0;
-				readFailure = (checkRead = pread64(fdIn, outBuf, filesize, 0)) != filesize;
+				readFailure = (checkRead = read(fdIn, outBuf, filesize)) != filesize;
 			} else {
 				readFailure = false;
 				checkRead = filesize;

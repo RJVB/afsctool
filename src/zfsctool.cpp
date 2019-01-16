@@ -1366,6 +1366,7 @@ long long process_file_info(const char *filepath, const char* /*filetype*/, stru
 	} else {
 		isCompressed = false;
 		if (printVerbose > 2
+			&& fileinfo->st_size > 0
 #ifdef linux
 			&& geteuid() == 0
 #endif

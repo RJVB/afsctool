@@ -178,11 +178,13 @@ static bool quitRequested = FALSE;
 static void signal_handler(int sig)
 {
 	char *msg = nullptr;
+	bool reRaise = false;
 	switch (sig) {
 		case SIGHUP:
 		case SIGINT:
 		case SIGTERM:
 			msg = (char*) "Received quit request: zfsctool will exit (please be patient!)\n";
+			// fallthrough
 		default:
 			if (!msg) {
 				msg = (char*) "Going down on signal; dataset compression will probably NOT be reset!\n";
@@ -198,14 +200,19 @@ static void signal_handler(int sig)
 		// signals we cannot recover from; inform the user in a signal-safe way:
 		case SIGBUS:
 			msg = (char*) "Going down on BUS error; dataset compression will NOT be reset!\n";
+			reRaise = true;
 			break;
 		case SIGSEGV:
 			msg = (char*) "Going down on SEGV error; dataset compression will NOT be reset!\n";
-			break;
+			reRaise = true;
 			break;
 	}
 	if (msg) {
 		write(STDERR_FILENO, msg, strlen(msg));
+	}
+	if (reRaise) {
+		signal(sig, SIG_DFL);
+		raise(sig);
 	}
 }
 
@@ -1819,16 +1826,17 @@ next_arg:
 					if (printVerbose > 0) {
 						printFolderInfo(&folderinfo, hardLinkCheck);
 					}
-				} else if (PP) {
-					struct folder_info *fi = getParallelProcessorJobInfo(PP);
-					memcpy(fi, &folderinfo, sizeof(*fi));
-// 					reset certain fields
-					fi->num_files = 0;
-					fi->num_compressed = 0;
-					fi->uncompressed_size = fi->uncompressed_size_rounded = 0;
-					fi->compressed_size = fi->compressed_size_rounded = 0;
-					fi->total_size = 0;
 				}
+			}
+			if (PP && nJobs > 0) {
+				struct folder_info *fi = getParallelProcessorJobInfo(PP);
+				memcpy(fi, &folderinfo, sizeof(*fi));
+ 				// reset certain fields
+				fi->num_files = 0;
+				fi->num_compressed = 0;
+				fi->uncompressed_size = fi->uncompressed_size_rounded = 0;
+				fi->compressed_size = fi->compressed_size_rounded = 0;
+				fi->total_size = 0;
 			}
 		}
 
@@ -1843,6 +1851,19 @@ next_arg:
 	}
 
 	if (PP) {
+		if (nJobs > 0) {
+			struct folder_info *fi = getParallelProcessorJobInfo(PP);
+			if (!fi->z_compression) {
+				// not yet initialised
+				memcpy(fi, &folderinfo, sizeof(*fi));
+ 				// reset certain fields
+				fi->num_files = 0;
+				fi->num_compressed = 0;
+				fi->uncompressed_size = fi->uncompressed_size_rounded = 0;
+				fi->compressed_size = fi->compressed_size_rounded = 0;
+				fi->total_size = 0;
+			}
+		}
 		if (sortQueue) {
 			sortFilesInParallelProcessorBySize(PP);
 		}

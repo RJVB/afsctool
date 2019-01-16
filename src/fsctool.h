@@ -87,8 +87,8 @@ private:
 		// we don't duplicate the filetypeslist!
 		filetypeslist = NULL;
 		filetypeslistlen = filetypeslistsize = 0;
-        // nor the dynamic ZFS properties
-        z_compression = nullptr;
+        // no need to reset z_compression ATM since it holds
+        // the address of a local variable that remains valid.
 	}
 #endif
 };

@@ -2339,6 +2339,7 @@ int afsctool (int argc, const char * argv[])
 	UInt64 big64;
 	int nJobs = 0, nReverse = 0;
 	bool sortQueue = false;
+	bool ppJobInfoInitialised = false;
 
 	folderinfo.filetypeslist = NULL;
 	folderinfo.filetypeslistlen = 0;
@@ -3213,17 +3214,18 @@ next_arg:;
 						printFolderInfo( &folderinfo, hardLinkCheck );
 					}
 				}
-				else if (PP)
-				{
-					struct folder_info *fi = getParallelProcessorJobInfo(PP);
-					memcpy(fi, &folderinfo, sizeof(*fi));
-// 					reset certain fields
-					fi->num_files = 0;
-					fi->num_compressed = 0;
-					fi->uncompressed_size = fi->uncompressed_size_rounded = 0;
-					fi->compressed_size = fi->compressed_size_rounded = 0;
-					fi->total_size = 0;
-				}
+			}
+			if (PP && nJobs > 0)
+			{
+				struct folder_info *fi = getParallelProcessorJobInfo(PP);
+				memcpy(fi, &folderinfo, sizeof(*fi));
+				// reset certain fields
+				fi->num_files = 0;
+				fi->num_compressed = 0;
+				fi->uncompressed_size = fi->uncompressed_size_rounded = 0;
+				fi->compressed_size = fi->compressed_size_rounded = 0;
+				fi->total_size = 0;
+				ppJobInfoInitialised = true;
 			}
 		}
 		
@@ -3244,6 +3246,20 @@ next_arg:;
 #ifdef SUPPORT_PARALLEL
 	if (PP)
 	{
+		if (nJobs > 0)
+		{
+			struct folder_info *fi = getParallelProcessorJobInfo(PP);
+			if (!ppJobInfoInitialised) {
+				memcpy(fi, &folderinfo, sizeof(*fi));
+				// reset certain fields
+				fi->num_files = 0;
+				fi->num_compressed = 0;
+				fi->uncompressed_size = fi->uncompressed_size_rounded = 0;
+				fi->compressed_size = fi->compressed_size_rounded = 0;
+				fi->total_size = 0;
+				ppJobInfoInitialised = true;
+			}
+		}
 		if (sortQueue)
 		{
 			sortFilesInParallelProcessorBySize(PP);

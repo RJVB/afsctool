@@ -30,10 +30,11 @@
 #include <sys/mman.h>
 
 #ifdef __APPLE__
-#	include <sys/attr.h>
+	#include <sys/attr.h>
 
-#	include <CoreFoundation/CoreFoundation.h>
-#	include <CoreServices/CoreServices.h>
+	#include <CoreFoundation/CoreFoundation.h>
+	#include <CoreServices/CoreServices.h>
+	#define BlockMutable	__block
 #else
 	// for cross-platform debugging only!
 	#include <bsd/stdlib.h>
@@ -50,6 +51,7 @@
 	#define OSSwapHostToLittleInt64(x)	htole64(x)
 	#define OSSwapLittleToHostInt32(x)	le32toh(x)
 	#define MAP_NOCACHE 				0
+	#define BlockMutable				/**/
 #endif
 
 #include "afsctool.h"
@@ -331,6 +333,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	bool checkFiles = folderinfo->check_files;
 	bool backupFile = folderinfo->backup_file;
 
+	BlockMutable int fdIn;
+	BlockMutable char *backupName = NULL;
+
 	// 64Kb block size (HFS compression is "64K chunked")
 	const int compblksize = 0x10000;
 	unsigned int numBlocks, outdecmpfsSize = 0;
@@ -342,7 +347,6 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	ssize_t xattrnamesize, outBufSize = 0;
 	UInt32 cmpf = DECMPFS_MAGIC, orig_mode;
 	struct timeval times[2];
-	char *backupName = NULL;
 #ifdef HAS_LZVN
 	void *lzvn_WorkSpace = NULL;
 #endif
@@ -355,6 +359,17 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 
 #ifdef __APPLE__
+	void (^restoreFile)() = ^{
+		if (write(fdIn, inBuf, filesize) != filesize) {
+			fprintf(stderr, "%s: Error restoring file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
+			if (backupName) {
+				fprintf(stderr, "\ta backup is available as %s\n", backupName);
+				xfree(backupName);
+			}
+			xclose(fdIn);
+		}
+	};
+
 	times[0].tv_sec = inFileInfo->st_atimespec.tv_sec;
 	times[0].tv_usec = inFileInfo->st_atimespec.tv_nsec / 1000;
 	times[1].tv_sec = inFileInfo->st_mtimespec.tv_sec;
@@ -457,7 +472,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 #endif
 	// use open() with an exclusive lock so noone can modify the file while we're at it
-	int fdIn = open(inFile, O_RDWR|O_EXLOCK);
+	fdIn = open(inFile, O_RDWR|O_EXLOCK);
 	if (fdIn == -1)
 	{
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
@@ -809,23 +824,26 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	signal(SIGHUP, SIG_IGN);
 #endif
 
-#ifdef __APPLE__
 	// fdIn is still open
-	ftruncate(fdIn, 0);
-	lseek(fdIn, SEEK_SET, 0);
-#endif
+	bool isTruncated = false;
 
 	//if (EndianU32_LtoN(*(UInt32 *) (outdecmpfsBuf + 4)) == CMP_ZLIB_RESOURCE_FORK)
 	if (OSSwapLittleToHostInt32(decmpfsAttr->compression_type) == compressionType.resourceFork)
 	{
-		if ((((double) (currBlock - outBuf + outdecmpfsSize + 50) / filesize) >= (1.0 - minSavings / 100) && minSavings != 0.0) ||
-			currBlock - outBuf + outdecmpfsSize + 50 >= filesize)
+		long long int newSize = currBlock - outBuf + outdecmpfsSize + 50;
+		if ((minSavings != 0.0 && ((double) newSize / filesize) >= (1.0 - minSavings / 100))
+			|| newSize >= filesize)
 		{
 			// reject the compression result: doesn't meet user criteria or the compressed
 			// version is larger than the uncompressed file.
 			// TODO: shouldn't this be checked for all HFS-compressed types,
 			//       not just for the resource-fork based variant?
 			utimes(inFile, times);
+			if (printVerbose > 2) {
+				fprintf(stderr,
+					"%s: compressed size (%lld) doesn't give required savings (%g) or larger than original (%lld)\n",
+					inFile, newSize, minSavings, filesize);
+			}
 			goto bail;
 		}
 		// create and write the resource fork:
@@ -857,12 +875,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				resourceTrailer->magic4 = OSSwapHostToLittleInt64(0xFFFF0100);
 				resourceTrailer->spacer2 = 0;
 #ifdef __APPLE__
+				ftruncate(fdIn, 0);
+				lseek(fdIn, SEEK_SET, 0);
 				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, currBlock - outBuf + 50, 0,
 					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 				{
 					fprintf(stderr, "%s: setxattr(%d): %s (%d)\n", inFile, fdIn, strerror(errno), __LINE__);
+					restoreFile();
 					goto bail;
 				}
+				isTruncated = true;
 #else
 				if (printVerbose > 2) {
 					fprintf(stderr, "# setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n",
@@ -874,12 +896,16 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 #ifdef HAS_LZVN
 			case LZVN: {
 #ifdef __APPLE__
+				ftruncate(fdIn, 0);
+				lseek(fdIn, SEEK_SET, 0);
 				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, outBufSize, 0,
 					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 				{
 					fprintf(stderr, "%s: setxattr(%d): %s (%d)\n", inFile, fdIn, strerror(errno), __LINE__);
+					restoreFile();
 					goto bail;
 				}
+				isTruncated = true;
 #else
 				if (printVerbose > 2) {
 					fprintf(stderr, "# setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n",
@@ -900,10 +926,17 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 #ifdef __APPLE__
 	// set the decmpfs attribute, which may or may not contain compressed data.
+	// This requires negligible disk space so we do not truncate the file first,
+	// only (potentially) if the attribute was written successfully.
 	if (setxattr(inFile, DECMPFS_XATTR_NAME, outdecmpfsBuf, outdecmpfsSize, 0, XATTR_NOFOLLOW | XATTR_CREATE) < 0)
 	{
 		fprintf(stderr, "%s: setxattr(%d): %s (%d)\n", inFile, fdIn, strerror(errno), __LINE__);
 		goto bail;
+	}
+	if (!isTruncated) {
+		ftruncate(fdIn, 0);
+		lseek(fdIn, SEEK_SET, 0);
+		isTruncated = true;
 	}
 #else
 	if (printVerbose > 2) {
@@ -927,17 +960,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		{
 			fprintf(stderr, "%s: removexattr: %s\n", inFile, strerror(errno));
 		}
-		if (write(fdIn, inBuf, filesize) != filesize)
-		{
-			fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
-			if (backupName)
-			{
-				fprintf(stderr, "\ta backup is available as %s\n", backupName);
-				xfree(backupName);
-			}
-			xclose(fdIn)
-			goto bail;
-		}
+		restoreFile();
 		xclose(fdIn);
 		utimes(inFile, times);
 		goto bail;
@@ -2236,9 +2259,10 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 						lstat(currfile->fts_path, currfile->fts_statp);
 						if (((currfile->fts_statp->st_flags & UF_COMPRESSED) == 0) && folderinfo->print_files)
 						{
-							if (folderinfo->print_info > 0)
+							if (folderinfo->print_info > 0) {
 								printf("Unable to compress: ");
-							printf("%s\n", currfile->fts_path);
+								printf("%s\n", currfile->fts_path);
+							}
 						}
 #endif
 					}
@@ -3013,7 +3037,7 @@ next_arg:;
 			if (applycomp)
 			{
 				if ((fileinfo.st_flags & UF_COMPRESSED) == 0)
-					printf("Unable to compress file.\n");
+					printf("Unable to compress file (already compressed).\n");
 			}
 			else
 			{

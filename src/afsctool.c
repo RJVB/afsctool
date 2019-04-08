@@ -444,7 +444,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	numBlocks = (filesize + compblksize - 1) / compblksize;
 	// TODO: make compression-type specific (as far as that's possible).
-	if ((filesize + 0x13A + (numBlocks * 9)) > 2147483647) {
+	if ((filesize + 0x13A + (numBlocks * 9)) > 2147483647LL) {
 #if !defined(NO_USE_MMAP)
 #	if defined(ZLIB_SINGLESHOT_OUTBUF)
 		if (comptype != ZLIB)

@@ -955,12 +955,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		return;
 	}
 
+	static long long int maxSupportableSize = 1LL << 31;
 	if (filesize == 0) {
 		if (folderinfo->print_info > 2) {
 			fprintf(stderr, "Skipping empty file %s\n", inFile);
 		}
 		return;
-	} else if (filesize > (1 << 31)) {
+	} else if (filesize > maxSupportableSize) {
 		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
 		return;
 	} else if (filesize > maxSize && maxSize != 0) {

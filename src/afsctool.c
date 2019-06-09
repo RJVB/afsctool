@@ -626,8 +626,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 #endif
 		default:
-			fprintf(stderr, "%s: unsupported compression type %d bytes\n",
-					inFile, comptype);
+			fprintf(stderr, "%s: unsupported compression type %d (%s)\n",
+					inFile, comptype, compressionTypeName(comptype));
 			utimes(inFile, times);
 			goto bail;
 			break;

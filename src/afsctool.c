@@ -2539,6 +2539,7 @@ int afsctool (int argc, const char * argv[])
 					if (strcasecmp(argv[i], "zlib") == 0) {
 						compressiontype = ZLIB;
 					} else if (strcasecmp(argv[i], "lzvn") == 0) {
+#ifdef HAS_LZVN
 						if(
 #if __has_builtin(__builtin_available)
 							// we can do simplified runtime OS version detection: accept LZVN on 10.9 and up.
@@ -2553,6 +2554,10 @@ int afsctool (int argc, const char * argv[])
 							fprintf(stderr, "Sorry, LZVN compression is supported from OS X 10.9 and up\n");
 							exit(EINVAL);
 						}
+#else // !HAS_LZVN
+						fprintf(stderr, "Sorry, LZVN compression has not been enabled in this build.\n");
+						exit(EINVAL);
+#endif
 					} else {
 						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
 // 						fprintf(stderr, "\tLZFSE compression will be supported from OS X 10.11 and up (not yet implemented)\n");

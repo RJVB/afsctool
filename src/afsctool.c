@@ -977,9 +977,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 #endif
 // 	fsync(fdIn);
 	xclose(fdIn);
+	lstat(inFile, inFileInfo);
 	if (checkFiles)
 	{
-		lstat(inFile, inFileInfo);
 		bool sizeMismatch = inFileInfo->st_size != filesize, readFailure = false, contentMismatch = false;
 		ssize_t checkRead= -2;
 		bool outBufMMapped = false;
@@ -2116,7 +2116,15 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 	} else {
 		printf("Folder size (compressed): %s\n", getSizeStr(foldersize, foldersize_rounded, 0));
 	}
-	printf("Compression savings: %0.1f%%\n", (1.0 - ((float) (folderinfo->compressed_size) / folderinfo->uncompressed_size)) * 100.0);
+	if (folderinfo->num_compressed) {
+		// There's difference between parallel mode and serial mode here: in the latter num_files
+		// is always the total number of files that were seen. In the former, it's the total
+		// number of compressable (i.e. processed) files.
+		printf("Compression savings: %0.1f%% over %lld of %lld %sfiles\n",
+			   (1.0 - ((float) (folderinfo->compressed_size) / folderinfo->uncompressed_size)) * 100.0,
+			   folderinfo->num_compressed, folderinfo->num_files,
+			   PP ? "processed " : "");
+	}
 	foldersize = folderinfo->total_size;
 	printf("Approximate total folder size (files + file overhead + folder overhead): %s\n",
 		   getSizeStr(foldersize, foldersize, 0));

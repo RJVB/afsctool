@@ -199,7 +199,7 @@ static void signal_handler(int sig)
 #endif
 }
 
-bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, bool *isAPFS)
+bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, int comptype, bool *isAPFS)
 {
 	struct statfs fsInfo;
 	errno = 0;
@@ -228,6 +228,11 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, bool *isAPF
 		// that case it will *de*compress the data before committing it. We
 		// won't play that game, wasting cycles and rewriting data for nothing.
 		return false;
+	}
+#endif
+#ifdef HAS_LZVN
+	if (comptype == LZVN && inFileInfo->st_size < LZVN_MINIMUM_COMPRESSABLE_SIZE) {
+		return 0;
 	}
 #endif
 #ifdef VOL_CAP_FMT_DECMPFS_COMPRESSION
@@ -381,7 +386,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	times[1].tv_usec = inFileInfo->st_mtim.tv_nsec / 1000;
 #endif
 	
-	if (!fileIsCompressable(inFile, inFileInfo, &folderinfo->onAPFS)){
+	if (!fileIsCompressable(inFile, inFileInfo, comptype, &folderinfo->onAPFS)){
 		return;
 	}
 	if (filesize > maxSize && maxSize != 0){
@@ -1789,7 +1794,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 #endif
 
 	if ((int)onAPFS == -1) {
-		fileIsCompressable(filepath, fileinfo, &onAPFS);
+		fileIsCompressable(filepath, fileinfo, compressionType, &onAPFS);
 	}
 
 #ifdef __APPLE__
@@ -2244,7 +2249,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 #ifdef SUPPORT_PARALLEL
 							if (PP)
 							{
-								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp, &folderinfo->onAPFS))
+								if (fileIsCompressable(currfile->fts_path, currfile->fts_statp, folderinfo->compressiontype, &folderinfo->onAPFS))
 									addFileToParallelProcessor( PP, currfile->fts_path, currfile->fts_statp, folderinfo, false );
 								else
 									process_file_info(currfile->fts_path, NULL, currfile->fts_statp, getParallelProcessorJobInfo(PP));
@@ -2754,7 +2759,7 @@ next_arg:;
 #ifdef SUPPORT_PARALLEL
 			if (PP)
 			{
-				if (fileIsCompressable(fullpath, &fileinfo, &fi.onAPFS))
+				if (fileIsCompressable(fullpath, &fileinfo, compressiontype, &fi.onAPFS))
 				{
 					addFileToParallelProcessor( PP, fullpath, &fileinfo, &fi, true );
 				}
@@ -3056,7 +3061,7 @@ next_arg:;
 		else if (argIsFile && printVerbose > 0)
 		{
 			bool onAPFS;
-			fileIsCompressable(fullpath, &fileinfo, &onAPFS);
+			fileIsCompressable(fullpath, &fileinfo, compressiontype, &onAPFS);
 			printFileInfo(fullpath, &fileinfo, applycomp, onAPFS);
 		}
 		else if (!argIsFile)

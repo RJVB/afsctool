@@ -3054,8 +3054,11 @@ next_arg:;
 		{
 			if (applycomp)
 			{
-				if ((fileinfo.st_flags & UF_COMPRESSED) == 0)
-					printf("Unable to compress file (already compressed).\n");
+				if ((fileinfo.st_flags & UF_COMPRESSED) == 0) {
+					printf("Unable to compress file.\n");
+				} else {
+					printf("File is already HFS+/APFS compressed.\n");
+				}
 			}
 			else
 			{

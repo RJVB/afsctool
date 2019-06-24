@@ -231,8 +231,14 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, int comptyp
 	}
 #endif
 #ifdef HAS_LZVN
-	if (comptype == LZVN && inFileInfo->st_size < LZVN_MINIMUM_COMPRESSABLE_SIZE) {
-		return 0;
+	// the LZVN compressor we use fails on buffers that too small, so we need to verify
+	// if the file gets to be split into chunks that are all large enough.
+	if (comptype == LZVN && (inFileInfo->st_size % 0x10000) < LZVN_MINIMUM_COMPRESSABLE_SIZE) {
+		if (printVerbose >= 2) {
+			fprintf( stderr, "\"%s\": file too small or will contain a too small compression chunk (try ZLIB compression)\n",
+					 inFile);
+		}
+		return false;
 	}
 #endif
 #ifdef VOL_CAP_FMT_DECMPFS_COMPRESSION
@@ -737,9 +743,15 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 					lzvn_encode(outBufBlock, lzvn_EstimatedCompressedSize, cursor, bytesAfterCursor, lzvn_WorkSpace);
 				if (cmpedsize <= 0)
 				{
-					fprintf( stderr, "%s: lzvn compression failed on chunk #%d\n", inFile, blockNr);
-					utimes(inFile, times);
-					goto bail;
+					fprintf( stderr, "%s: lzvn compression failed on chunk #%d (of %u; %lu bytes)\n",
+							 inFile, blockNr, numBlocks, bytesAfterCursor);
+// 					if (bytesAfterCursor < LZVN_MINIMUM_COMPRESSABLE_SIZE) {
+// 						cmpedsize = bytesAfterCursor;
+// 						memcpy(outBufBlock, cursor, bytesAfterCursor);
+// 					} else {
+						utimes(inFile, times);
+						goto bail;
+// 					} 
 				}
 				// next offset will start at this offset
 				if (blockNr < numBlocks) {

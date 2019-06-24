@@ -783,6 +783,7 @@ static bool compressionOk(const char *inFile, const iZFSDataSetCompressionInfo *
 				return ret || allowReCompress;
 			}
 		}
+		// TODO : account for (divide st_blocks by) dataset copies=n here
 		return (info->initialCompression != *fi->z_compression)
 			|| allowReCompress
 			|| (st && *fi->z_compression == "off" && st->st_blocks * S_BLKSIZE < st->st_size);
@@ -1363,6 +1364,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo)
 	filesize = fileinfo->st_size;
 	printf("File size (real): %s\n", getSizeStr(filesize, filesize, 1));
 	// report the actual file-on-disk size
+	// TODO : account for (divide st_blocks by) dataset copies=n here
 	filesize = fileinfo->st_blocks * S_BLKSIZE;
 	filesize_rounded = roundToBlkSize(filesize, fileinfo);
 	printf("File size (on disk): %s\n", getSizeStr(filesize, filesize_rounded, 0));
@@ -1377,6 +1379,7 @@ long long process_file_info(const char *filepath, const char* /*filetype*/, stru
 		return 0;
 	}
 
+	// TODO : account for (divide st_blocks by) dataset copies=n here
 	const auto sizeInBlocks = fileinfo->st_blocks * S_BLKSIZE;
 	bool isCompressed;
 

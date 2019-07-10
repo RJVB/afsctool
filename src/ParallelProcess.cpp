@@ -400,6 +400,9 @@ DWORD FileProcessor::Run(LPVOID /*arg*/)
 			nProcessed += 1;
 			scope = NULL;
 
+			// be tidy and remove the entry from the filename -> FileEntry map
+			PP->itemForName().erase(entry.fileName);
+
 			runningTotalRaw += entry.fileInfo.st_size;
 			runningTotalCompressed += (entry.compressedSize > 0)? entry.compressedSize : entry.fileInfo.st_size;
 			/*if( PP->verbose() > 1 )*/{
@@ -493,16 +496,17 @@ void releaseParallelProcessor(ParallelFileProcessor *p)
 bool addFileToParallelProcessor(ParallelFileProcessor *p, const char *inFile, const struct stat *inFileInfo,
 								struct folder_info *folderInfo, const bool ownInfo)
 {
-	if( p && inFile && inFileInfo && folderInfo ){
-		if( ownInfo ){
-			p->items().push_back(FileEntry( inFile, inFileInfo, new FolderInfo(*folderInfo), ownInfo ));
-		}
-		else{
-			p->items().push_back(FileEntry( inFile, inFileInfo, folderInfo, ownInfo ));
-		}
+	if( p && inFile && inFileInfo && folderInfo && !p->itemForName().count(inFile) ){
+		const auto &entry = ownInfo ? FileEntry( inFile, inFileInfo, new FolderInfo(*folderInfo), ownInfo )
+			: FileEntry( inFile, inFileInfo, folderInfo, ownInfo );
+		p->items().push_back(entry);
+		p->itemForName()[inFile] = &entry;
 		return true;
 	}
 	else{
+		if (p->itemForName().count(inFile) && p->verbose() > 2){
+			fprintf( stderr, "File \"%s\" is already listed\n", inFile );
+		}
 //		   fprintf( stderr, "Error: Processor=%p file=%p, finfo=%p dinfo=%p, own=%d\n", p, inFile, inFileInfo, folderInfo, ownInfo );
 		return false;
 	}

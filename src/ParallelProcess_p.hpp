@@ -31,6 +31,7 @@ public:
 	typedef T ItemType;
 	typedef std::deque<ItemType> ItemQueue;
 	typedef typename ItemQueue::size_type size_type;
+	typedef google::dense_hash_map<std::string,const ItemType*> NameToItemMap;
 
 	ParallelProcessor()
 	{
@@ -38,6 +39,10 @@ public:
 		listLock = new CRITSECTLOCK(4000);
 		threadLock = new CRITSECTLOCK(4000);
 		quitRequestedFlag = false;
+		itemMapForName.set_empty_key(std::string());
+		// pick a file that can't be compressed as the deleted key
+		itemMapForName.set_deleted_key("/dev/null");
+		itemMapForName.clear();
 	}
 	virtual ~ParallelProcessor()
 	{
@@ -60,6 +65,11 @@ public:
 	size_t itemCount()
 	{
 		return itemList.size();
+	}
+
+	NameToItemMap &itemForName()
+	{
+		return itemMapForName;
 	}
 
 	// return the number of elements in the itemList in a thread-safe fashion
@@ -124,6 +134,7 @@ protected:
 	CRITSECTLOCK *listLock;
 	CRITSECTLOCK *threadLock;
 	bool quitRequestedFlag;
+	NameToItemMap itemMapForName;
 };
 
 typedef struct folder_info FolderInfo;

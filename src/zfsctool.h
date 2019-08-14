@@ -60,5 +60,9 @@ extern int zfsctool(int argc, const char *argv[]);
 }
 #endif //__cplusplus
 
+#ifndef ZFSCTOOL_PROG_NAME
+#define ZFSCTOOL_PROG_NAME "zfsctool"
+#endif
+
 #define _ZFSCTOOL_H
 #endif //_ZFSCTOOL_H

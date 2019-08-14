@@ -2,7 +2,7 @@
 /*
  * @file afsctool.c
  * Copyright "brkirch" (https://brkirch.wordpress.com/afsctool/) 
- * Parallel processing modifications and other tweaks (C) 2015 René J.V. Bertin
+ * Parallel processing modifications and other tweaks (C) 2015-now René J.V. Bertin
  * This code is made available under the GPL3 License
  * (See License.txt)
  */
@@ -193,7 +193,7 @@ static bool quitRequested = FALSE;
 
 static void signal_handler(int sig)
 {
-	fprintf( stderr, "Received signal %d: afsctool will quit\n", sig );
+	fprintf( stderr, "Received signal %d: " AFSCTOOL_PROG_NAME " will quit\n", sig );
 #ifdef SUPPORT_PARALLEL
 	stopParallelProcessor(PP);
 #endif
@@ -2313,18 +2313,18 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 
 void printUsage()
 {
-	printf("afsctool %s\n"
-		   "Report if file is HFS+/APFS compressed:                   afsctool [-v] file[s]\n"
-		   "Report if folder contains HFS+/APFS compressed files:     afsctool [-fvv[v]i] [-t <ContentType/Extension>] folder[s]\n"
-		   "List HFS+/APFS compressed files in folder:                afsctool -l[fvv[v]] folder\n"
-		   "Decompress HFS+/APFS compressed file or folder:           afsctool -d[i] [-t <ContentType>] file[s]/folder[s]\n"
+	printf( AFSCTOOL_PROG_NAME " %s\n"
+		   "Report if file is HFS+/APFS compressed:                   " AFSCTOOL_PROG_NAME " [-v] file[s]\n"
+		   "Report if folder contains HFS+/APFS compressed files:     " AFSCTOOL_PROG_NAME " [-fvv[v]i] [-t <ContentType/Extension>] folder[s]\n"
+		   "List HFS+/APFS compressed files in folder:                " AFSCTOOL_PROG_NAME " -l[fvv[v]] folder\n"
+		   "Decompress HFS+/APFS compressed file or folder:           " AFSCTOOL_PROG_NAME " -d[i] [-t <ContentType>] file[s]/folder[s]\n"
 		   "\tNB: this removes the entire resource fork from the specified files!\n"
-		   "Create archive file with compressed data in data fork:    afsctool -a[d] src dst [... srcN dstN]\n"
-		   "Extract HFS+/APFS compression archive to file:            afsctool -x[d] src dst [... srcN dstN]\n"
+		   "Create archive file with compressed data in data fork:    " AFSCTOOL_PROG_NAME " -a[d] src dst [... srcN dstN]\n"
+		   "Extract HFS+/APFS compression archive to file:            " AFSCTOOL_PROG_NAME " -x[d] src dst [... srcN dstN]\n"
 #ifdef SUPPORT_PARALLEL
-		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvv[v]ib] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] [-T compressor] file[s]/folder[s]\n\n"
+		   "Apply HFS+/APFS compression to file or folder:            " AFSCTOOL_PROG_NAME " -c[nlfvv[v]ib] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] [-T compressor] file[s]/folder[s]\n\n"
 #else
-		   "Apply HFS+/APFS compression to file or folder:            afsctool -c[nlfvv[v]ib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] [-T compressor] file[s]/folder[s]\n\n"
+		   "Apply HFS+/APFS compression to file or folder:            " AFSCTOOL_PROG_NAME " -c[nlfvv[v]ib] [-<level>] [-m <size>] [-s <percentage>] [-t <ContentType>] [-T compressor] file[s]/folder[s]\n\n"
 #endif
 		   "Options:\n"
 		   "-v Increase verbosity level\n"

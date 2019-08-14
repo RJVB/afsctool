@@ -188,7 +188,7 @@ static void signal_handler(int sig)
 		case SIGHUP:
 		case SIGINT:
 		case SIGTERM:
-			msg = (char*) "Received quit request: zfsctool will exit (please be patient!)\n";
+			msg = (char*) "Received quit request: " ZFSCTOOL_PROG_NAME " will exit (please be patient!)\n";
 			// fallthrough
 		default:
 			if (!msg) {
@@ -1527,8 +1527,8 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 
 void printUsage()
 {
-	printf("zfsctool %s\n"
-	   "Apply compression to file or folder: zfsctool -c[nlfFLvv[v]b] [-q] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-T compressor] file[s]/folder[s]\n\n"
+	printf(ZFSCTOOL_PROG_NAME " %s\n"
+	   "Apply compression to file or folder: " ZFSCTOOL_PROG_NAME " -c[nlfFLvv[v]b] [-q] [-jN|-JN] [-S [-RM] ] [-<level>] [-m <size>] [-T compressor] file[s]/folder[s]\n\n"
 	   "Options:\n"
 	   "-v Increase verbosity level\n"
 	   "-F allow (re)compression to the dataset's current compression type (a.k.a. undo mode)\n"

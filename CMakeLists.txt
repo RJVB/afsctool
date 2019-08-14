@@ -9,7 +9,10 @@ option(ZLIB_SINGLESHOT
     "Does the ZLIB compression into a sufficiently (= too) large output buffer instead of using a growing buffer.\
     May be somewhat faster at the expense of approx. 4x higher memory usage."
     OFF)
-
+option(NEW_DRIVER_NAMES
+    "If Off, use the old driver name (afsctool, and thus also zfsctool). When On, rename the drivers \
+    to afscompress and zfscompress."
+    OFF)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/_cmake/modules ${CMAKE_MODULE_PATH} )
 
 include(FeatureSummary)
@@ -79,39 +82,50 @@ add_library(PP OBJECT
     src/CritSectEx/timing.c
 )
 
-add_executable(afsctool
+if (NEW_DRIVER_NAMES)
+    set(AFSCTOOL "afscompress")
+    set(ZFSCTOOL "zfscompress")
+else()
+    set(AFSCTOOL "afsctool")
+    set(ZFSCTOOL "zfsctool")
+endif()
+set_source_files_properties(src/afsctool.c PROPERTIES COMPILE_DEFINITIONS AFSCTOOL_PROG_NAME="${AFSCTOOL}")
+
+add_executable(${AFSCTOOL}
     src/afsctool.c
     src/main.cpp
     $<TARGET_OBJECTS:PP>
 )
 if(HFSCOMPRESS_TO_ZFS)
-    set_source_files_properties(afsctool.c PROPERTIES COMPILE_DEFINITIONS HFSCOMPRESS_TO_ZFS)
+    set_source_files_properties(src/afsctool.c PROPERTIES COMPILE_DEFINITIONS HFSCOMPRESS_TO_ZFS)
 endif()
 
 # target_include_directories(afsctool PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
-set_target_properties(afsctool PROPERTIES
+set_target_properties(${AFSCTOOL} PROPERTIES
     LINK_FLAGS "${ZLIBP_LIBRARY_LDFLAGS}")
-target_link_libraries(afsctool ${ZLIBP_LIBRARIES} ${PKG_SPARSEHASH_LIBRARIES})
+target_link_libraries(${AFSCTOOL} ${ZLIBP_LIBRARIES} ${PKG_SPARSEHASH_LIBRARIES})
 if(LZVN_LIBRARY)
-    target_link_libraries(afsctool ${LZVN_LIBRARY})
+    target_link_libraries(${AFSCTOOL} ${LZVN_LIBRARY})
 endif()
 if(APPLE)
-    target_link_libraries(afsctool "-framework CoreServices")
+    target_link_libraries(${AFSCTOOL} "-framework CoreServices")
+
+    install(TARGETS ${AFSCTOOL} DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 else()
-    target_link_libraries(afsctool "-lrt -ldl -lbsd -pthread")
+    target_link_libraries(${AFSCTOOL} "-lrt -ldl -lbsd -pthread")
 endif()
 
-add_executable(zfsctool
+add_executable(${ZFSCTOOL}
     src/zfsctool.cpp
     $<TARGET_OBJECTS:PP>
 )
-target_link_libraries(zfsctool ${PKG_SPARSEHASH_LIBRARIES})
-if(APPLE)
-    target_link_libraries(zfsctool "-framework CoreServices")
+set_source_files_properties(src/zfsctool.cpp PROPERTIES COMPILE_DEFINITIONS ZFSCTOOL_PROG_NAME="${ZFSCTOOL}")
 
-    install(TARGETS afsctool DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+target_link_libraries(${ZFSCTOOL} ${PKG_SPARSEHASH_LIBRARIES})
+if(APPLE)
+    target_link_libraries(${ZFSCTOOL} "-framework CoreServices")
 else()
-    target_link_libraries(zfsctool "-lrt -ldl -lbsd -pthread")
+    target_link_libraries(${ZFSCTOOL} "-lrt -ldl -lbsd -pthread")
 endif()
 
 FEATURE_SUMMARY(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)

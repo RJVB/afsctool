@@ -455,19 +455,9 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 
 	numBlocks = (filesize + compblksize - 1) / compblksize;
 	// TODO: make compression-type specific (as far as that's possible).
-	if ((filesize + 0x13A + (numBlocks * 9)) > 2147483647LL) {
-#if !defined(NO_USE_MMAP)
-#	if defined(ZLIB_SINGLESHOT_OUTBUF)
-		if (comptype != ZLIB)
-#	endif
-		{
-			useMmap = true;
-		}
-#endif
-		if (!useMmap) {
-			fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
-			return;
-		}
+	if ((filesize + 0x13A + (numBlocks * 9)) > CMP_MAX_SUPPORTED_SIZE) {
+		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
+		return;
 	} else if (filesize >= 64 * 1024 * 1024) {
 		// use a rather arbitrary threshold above which using mmap may be of interest
 		useMmap = true;

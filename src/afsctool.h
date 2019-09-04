@@ -23,7 +23,7 @@
 #include <hfs/hfs_format.h>
 
 #include <AvailabilityMacros.h>
-#include <MacTypes.h>
+#include <CoreServices/CoreServices.h>
 #else
     #define false 0
     #define FALSE 0

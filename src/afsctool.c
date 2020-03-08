@@ -352,7 +352,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	unsigned int numBlocks, outdecmpfsSize = 0;
 	void *inBuf = NULL, *outBuf = NULL, *outBufBlock = NULL, *outdecmpfsBuf = NULL, *currBlock = NULL, *blockStart = NULL;
 	long long int inBufPos;
-	const long long int filesize = inFileInfo->st_size;
+	off_t filesize = inFileInfo->st_size;
 	unsigned long int cmpedsize;
 	char *xattrnames, *curr_attr;
 	ssize_t xattrnamesize, outBufSize = 0;

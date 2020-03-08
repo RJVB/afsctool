@@ -927,7 +927,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	bool backupFile = folderinfo->backup_file;
 
 	void *inBuf = NULL, *outBuf = NULL;
-	const long long int filesize = inFileInfo->st_size;
+	off_t filesize = inFileInfo->st_size;
 	mode_t orig_mode;
 	struct timeval times[2];
 	char *backupName = NULL;
@@ -1007,8 +1007,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	{
 		const ssize_t inRead = read(fdIn, inBuf, filesize);
 		if (inRead != filesize) {
-			fprintf(stderr, "%s: Error reading file; read %lld of %lld bytes (%s)\n",
-					inFile, inRead, filesize, strerror(errno));
+			fprintf(stderr, "%s: Error reading file; read %zd of %jd bytes (%s)\n",
+					inFile, inRead, (intmax_t)filesize, strerror(errno));
 			xclose(fdIn);
 			utimes(inFile, times);
 			free(inBuf);

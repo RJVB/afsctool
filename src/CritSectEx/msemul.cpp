@@ -130,8 +130,8 @@ static void createSharedMemKey()
 int MSEmul_UseSharedMemory(int useShared)
 { int ret;
 	pthread_once( &sharedMemKeyCreated, createSharedMemKey );
-	ret = (int) ((size_t)pthread_getspecific(sharedMemKey));
-	pthread_setspecific( sharedMemKey, (void*) useShared );
+	ret = (int) ((intptr_t)pthread_getspecific(sharedMemKey));
+	pthread_setspecific( sharedMemKey, (void*) (intptr_t)useShared);
 	return ret;
 }
 
@@ -141,7 +141,7 @@ int MSEmul_UseSharedMemory(int useShared)
 int MSEmul_UseSharedMemory()
 {
 	pthread_once( &sharedMemKeyCreated, createSharedMemKey );
-	return (int) ((size_t)pthread_getspecific(sharedMemKey));
+	return (int) (intptr_t)pthread_getspecific(sharedMemKey);
 }
 
 /**
@@ -583,6 +583,8 @@ DWORD WaitForSingleObject( HANDLE hHandle, DWORD dwMilliseconds )
 				}
 				break;
 			}
+			default:
+				fprintf(stderr, "WaitForSingleObject: unhandled event %s\n", (*HANDLETypeName)[hHandle->type]);
 		}
 	}
 	else switch( hHandle->type ){
@@ -666,6 +668,8 @@ DWORD WaitForSingleObject( HANDLE hHandle, DWORD dwMilliseconds )
 				return WAIT_OBJECT_0;
 			}
 			break;
+		default:
+			fprintf(stderr, "WaitForSingleObject: unhandled event %s\n", (*HANDLETypeName)[hHandle->type]);
 	}
 	return WAIT_FAILED;
 }
@@ -1791,6 +1795,10 @@ MSHANDLE::~MSHANDLE()
 			if( d.t.theThread && d.t.theThread->exited ){
 				delete d.t.theThread;
 			}
+			break;
+		case MSH_EMPTY:
+			break;
+		case MSH_CLOSED:
 			break;
 	}
 	if( ret ){

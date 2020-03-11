@@ -762,8 +762,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				currBlock = outBuf + currBlockOffset;
 				currBlockLen = outBufSize;
 				if (blockNr > 1 && ((UInt32*)currBlock)[-1] != prevLast) {
-					fprintf(stderr, "%s: warning, possible chunking overlap: prevLast=%lu currBlock[-1]=%lu currBlock[0]=%lu\n",
-							inFile, prevLast, ((UInt32*)currBlock)[-sizeof(UInt32)], ((UInt32*)currBlock)[0]);
+					fprintf(stderr, "%s: warning, possible chunking overlap: prevLast=%u currBlock[-1]=%u currBlock[0]=%u\n",
+						inFile, (uint32_t) prevLast, (uint32_t)((UInt32*)currBlock)[-sizeof(UInt32)], (uint32_t)((UInt32*)currBlock)[0]);
 				}
 				break;
 			}
@@ -2962,7 +2962,7 @@ next_arg:;
 						}
 						free(attr_buf);
 					}
-					// unreachable
+					__builtin_unreachable();
 					fprintf(stderr, "%s: Error reading file\n", fullpath);
 					return -1;
 				decomp_check:

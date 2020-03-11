@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
 
+project(afsctool VERSION 1.7.0)
+set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
+
 include(CheckTypeSize)
 
 option(HFSCOMPRESS_TO_ZFS
@@ -51,9 +54,6 @@ include(CheckIncludeFile)
 include(GetGitRevisionDescription)
 
 set(CMAKE_CXX_STANDARD 11)
-
-project(afsctool VERSION 1.7.0)
-set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
 
 find_package(ZLIBP 1.2.8 REQUIRED)
 find_package(SPARSEHASH)

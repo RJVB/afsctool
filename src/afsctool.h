@@ -56,7 +56,7 @@ extern "C" {
 #define CMP_LZFSE_XATTR				11	/* LZVN-compressed data is stored in the xattr. */
 #define CMP_LZFSE_RESOURCE_FORK		12	/* LZVN-compressed data is stored in the resource fork. */
 
-#define CMP_MAX_SUPPORTED_SIZE      ((1 << 31) - 1)
+#define CMP_MAX_SUPPORTED_SIZE      ((off_t)(1UL << 31) - 1)
 
 struct filetype_info
 {

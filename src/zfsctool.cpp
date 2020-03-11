@@ -64,6 +64,9 @@ static bool exclusive_io = true;
 #define xclose(x)		if((x)!=-1){close((x)); (x)=-1;}
 #define xmunmap(x,s)	if((x)){munmap((x),(s)); (x)=NULL;}
 
+// thanks, Qt:
+#define UNUSED(x)		(void)x;
+
 // use a hard-coded count so all arrays are always sized equally (and the compiler can warn better)
 const int sizeunits = 6;
 const char *sizeunit10_short[sizeunits] = {"KB", "MB", "GB", "TB", "PB", "EB"};
@@ -321,6 +324,7 @@ public:
 
 	static Results run(std::string command, bool wantOutput=true, size_t outputLen=256, int outputTimeout=250)
 	{
+		UNUSED(outputLen);
 		errno = 0;
 		auto worker = new ZFSCommandEngine(command, wantOutput, MAXPATHLEN, outputTimeout);
 		Results ret = {worker->theCommand, "", (DWORD)-1, -1, COMMAND_OK};
@@ -601,6 +605,7 @@ protected:
 			bool testing = (newComp == "test" || currentCompression == "test");
 			std::string command = std::string(testing ? "echo zfs" : "zfs")
 				+ " set compression=" + newComp;
+			UNUSED(resetting);
 // 			if (resetting) {
 // 				// resetting, restore sync too
 // 				command += " sync=" + initialSync;
@@ -927,7 +932,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	bool backupFile = folderinfo->backup_file;
 
 	void *inBuf = NULL, *outBuf = NULL;
-	const long long int filesize = inFileInfo->st_size;
+	off_t filesize = inFileInfo->st_size;
 	mode_t orig_mode;
 	struct timeval times[2];
 	char *backupName = NULL;
@@ -1007,8 +1012,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	{
 		const ssize_t inRead = read(fdIn, inBuf, filesize);
 		if (inRead != filesize) {
-			fprintf(stderr, "%s: Error reading file; read %lld of %lld bytes (%s)\n",
-					inFile, inRead, filesize, strerror(errno));
+			fprintf(stderr, "%s: Error reading file; read %zd of %jd bytes (%s)\n",
+					inFile, inRead, (intmax_t)filesize, strerror(errno));
 			xclose(fdIn);
 			utimes(inFile, times);
 			free(inBuf);

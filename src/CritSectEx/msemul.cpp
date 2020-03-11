@@ -32,7 +32,7 @@
 #include "CritSectEx.h"
 #define CRITSECTLOCK	MutexEx
 
-static void cseUnsleep( int sig )
+static void cseUnsleep( int )
 {
 //	fprintf( stderr, "SIGALRM\n" );
 }
@@ -130,8 +130,8 @@ static void createSharedMemKey()
 int MSEmul_UseSharedMemory(int useShared)
 { int ret;
 	pthread_once( &sharedMemKeyCreated, createSharedMemKey );
-	ret = (int) ((size_t)pthread_getspecific(sharedMemKey));
-	pthread_setspecific( sharedMemKey, (void*) useShared );
+	ret = (int) ((intptr_t)pthread_getspecific(sharedMemKey));
+	pthread_setspecific( sharedMemKey, (void*) (intptr_t) useShared);
 	return ret;
 }
 
@@ -141,7 +141,7 @@ int MSEmul_UseSharedMemory(int useShared)
 int MSEmul_UseSharedMemory()
 {
 	pthread_once( &sharedMemKeyCreated, createSharedMemKey );
-	return (int) ((size_t)pthread_getspecific(sharedMemKey));
+	return (int) (intptr_t)pthread_getspecific(sharedMemKey);
 }
 
 /**
@@ -583,6 +583,11 @@ DWORD WaitForSingleObject( HANDLE hHandle, DWORD dwMilliseconds )
 				}
 				break;
 			}
+			default:
+#ifdef DEBUG
+				fprintf(stderr, "WaitForSingleObject: unhandled event %s\n", (*HANDLETypeName)[hHandle->type]);
+#endif
+				break;
 		}
 	}
 	else switch( hHandle->type ){
@@ -665,6 +670,11 @@ DWORD WaitForSingleObject( HANDLE hHandle, DWORD dwMilliseconds )
 				hHandle->d.t.pThread = NULL;
 				return WAIT_OBJECT_0;
 			}
+			break;
+		default:
+#ifdef DEBUG
+			fprintf(stderr, "WaitForSingleObject: unhandled event %s\n", (*HANDLETypeName)[hHandle->type]);
+#endif
 			break;
 	}
 	return WAIT_FAILED;
@@ -816,7 +826,7 @@ HANDLE OpenSemaphore( DWORD ign_dwDesiredAccess, BOOL ign_bInheritHandle, char *
 }
 
 
-MSHANDLE::MSHANDLE( void* ign_lpSemaphoreAttributes, long lInitialCount, long lMaximumCount, char *lpName )
+MSHANDLE::MSHANDLE( void* /*ign_lpSemaphoreAttributes*/, long lInitialCount, long lMaximumCount, char *lpName )
 { type = MSH_EMPTY;
 	if( lpName ){
 		if( lInitialCount >= 0 && lMaximumCount > 0 ){
@@ -898,7 +908,7 @@ HANDLE CreateSemaphore( void* ign_lpSemaphoreAttributes, long lInitialCount, lon
 	return ret;
 }
 
-MSHANDLE::MSHANDLE( void *ign_lpMutexAttributes, BOOL bInitialOwner, char *ign_lpName )
+MSHANDLE::MSHANDLE( void */*ign_lpMutexAttributes*/, BOOL bInitialOwner, char */*ign_lpName*/ )
 {
 	if( !pthread_mutex_init( &d.m.mutbuf, NULL ) ){
 		d.m.mutex = &d.m.mutbuf;
@@ -936,7 +946,7 @@ HANDLE CreateMutex( void *ign_lpMutexAttributes, BOOL bInitialOwner, char *ign_l
 	return ret;
 }
 
-MSHANDLE::MSHANDLE( void *ign_lpEventAttributes, BOOL bManualReset, BOOL bInitialState, char *ign_lpName )
+MSHANDLE::MSHANDLE( void */*ign_lpEventAttributes*/, BOOL bManualReset, BOOL bInitialState, char */*ign_lpName*/ )
 {
 	if( !pthread_cond_init( &d.e.condbuf, NULL ) ){
 		d.e.cond = &d.e.condbuf;
@@ -991,7 +1001,7 @@ HANDLE msCreateEvent( void *ign_lpEventAttributes, BOOL bManualReset, BOOL ign_b
 /**
 	initialises a pthread_timed_t structure EXCEPT for the actual thread creation
  */
-static int timedThreadInitialise(pthread_timed_t *tt, const pthread_attr_t *attr,
+static int timedThreadInitialise(pthread_timed_t *tt, const pthread_attr_t */*attr*/,
                           LPTHREAD_START_ROUTINE start_routine, void *arg )
 { int ret = 0;
 	if( tt ){
@@ -1081,7 +1091,7 @@ pthread_timed_t::~pthread_timed_t()
 	pthread_exit() being called in the user's start_routine). It sets
 	tt->exiting as pthread_timedexit would.
  */
-static void threadCancelHandler(void *dum)
+static void threadCancelHandler(void */*dum*/)
 { pthread_timed_t *tt;
 #if DEBUG > 1
 	fprintf( stderr, "@@ %p is being cancelled\n", pthread_self() );
@@ -1258,7 +1268,6 @@ static void pthread_u2_handler(int sig)
 	if( suspendKey ){
 		switch( sig ){
 			case SIGUSR2:{
-			  HANDLE mshThread;
 				// get the mutex from a specific key
 				ThreadSuspender( (HANDLE) pthread_getspecific(suspendKey) );
 				break;
@@ -1325,7 +1334,7 @@ int pthread_create_suspendable( HANDLE mshThread, const pthread_attr_t *attr,
 
 static std::mutex gThreadStartMutex;
 
-MSHANDLE::MSHANDLE( void *ign_lpThreadAttributes, size_t ign_dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress,
+MSHANDLE::MSHANDLE( void */*ign_lpThreadAttributes*/, size_t /*ign_dwStackSize*/, LPTHREAD_START_ROUTINE lpStartAddress,
 	    void *lpParameter, DWORD dwCreationFlags, DWORD *lpThreadId )
 { void* (*start_routine)(void*) = (void* (*)(void*)) lpStartAddress;
   extern void *timedThreadStartRoutine( void *args );
@@ -1791,6 +1800,8 @@ MSHANDLE::~MSHANDLE()
 			if( d.t.theThread && d.t.theThread->exited ){
 				delete d.t.theThread;
 			}
+			break;
+		default:
 			break;
 	}
 	if( ret ){

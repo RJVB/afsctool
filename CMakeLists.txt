@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
-project(afsctool VERSION 1.7.0)
-set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
+
+include(CheckTypeSize)
 
 option(HFSCOMPRESS_TO_ZFS
     "Should afsctool compress files on ZFS dataset that claim to be HFS (testing only: the effort will be wasted)"
@@ -13,6 +13,36 @@ option(NEW_DRIVER_NAMES
     "If Off, use the old driver name (afsctool, and thus also zfsctool). When On, rename the drivers \
     to afscompress and zfscompress."
     OFF)
+check_type_size(void* VOID_P_SIZE)
+message(STATUS "sizeof(void*)=${VOID_P_SIZE}")
+# check if we're not doing a universal binary build on Mac:
+if(NOT ${VOID_P_SIZE} EQUAL 0)
+    if(${VOID_P_SIZE} EQUAL 4)
+        option(64BITBUILD
+            "Build for 64bit architecture"
+            OFF)
+    else()
+        option(64BITBUILD
+            "Build for 64bit architecture"
+            ON)
+    endif()
+
+    if(64BITBUILD)
+        if(APPLE)
+            set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -arch x86_64")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -arch x86_64")
+#             set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -arch x86_64")
+        else()
+            set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m64")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64")
+#             set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m64")
+        endif()
+    else()
+    endif()
+endif()
+# Not currently possible on Linux because the fts functions are incompatible
+# add_definitions("-D_FILE_OFFSET_BITS=64")
+
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/_cmake/modules ${CMAKE_MODULE_PATH} )
 
 include(FeatureSummary)
@@ -21,6 +51,9 @@ include(CheckIncludeFile)
 include(GetGitRevisionDescription)
 
 set(CMAKE_CXX_STANDARD 11)
+
+project(afsctool VERSION 1.7.0)
+set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
 
 find_package(ZLIBP 1.2.8 REQUIRED)
 find_package(SPARSEHASH)

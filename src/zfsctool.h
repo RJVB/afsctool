@@ -16,6 +16,7 @@
 #include <sys/time.h>
 #include <sys/param.h>
 #include <sys/mount.h>
+// TODO: use ftw functions so 64bit file offsets become possible on Linux?!
 #include <fts.h>
 #include <sys/xattr.h>
 

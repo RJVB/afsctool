@@ -83,11 +83,6 @@ const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 102
 static int printVerbose = 0;
 void printFileInfo(const char *filepath, struct stat *fileinfo);
 
-#if !__has_builtin(__builtin_available)
-#	warning "Please use clang 5 or newer if you can"
-// determine the Darwin major version number
-static int darwinMajor = 0;
-#endif
 
 static int ipcPipes[2] = {-1, -1};
 static char ipcPipeWriteEnd[64];
@@ -968,11 +963,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		return;
 	} else if (filesize > maxSupportableSize) {
-		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
+		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, (long long) filesize );
 		return;
 	} else if (filesize > maxSize && maxSize != 0) {
 		if (folderinfo->print_info > 2) {
-			fprintf(stderr, "Skipping file %s size %lld > max size %lld\n", inFile, filesize, maxSize);
+			fprintf(stderr, "Skipping file %s size %lld > max size %lld\n", inFile, (long long) filesize, (long long) maxSize);
 		}
 		return;
 	}
@@ -1003,7 +998,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 	inBuf = malloc(filesize);
 	if (inBuf == NULL) {
-		fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, filesize, strerror(errno));
+		fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n",
+				inFile, (long long) filesize, strerror(errno));
 		xclose(fdIn);
 		utimes(inFile, times);
 		return;
@@ -1051,7 +1047,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 		xfree(infile);
 		if (fwrite(inBuf, filesize, 1, fp) != 1) {
-			fprintf(stderr, "%s: Error writing to backup file %s (%lld bytes; %s)\n", inFile, backupName, filesize, strerror(errno));
+			fprintf(stderr, "%s: Error writing to backup file %s (%lld bytes; %s)\n",
+					inFile, backupName, (long long) filesize, strerror(errno));
 			fclose(fp);
 			goto bail;
 		}
@@ -1076,7 +1073,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		ssize_t written;
 		if ((written = write(fdIn, inBuf, filesize)) != filesize) {
 			fprintf(stderr, "%s: Error writing to file (written %ld of %lld bytes; %d=%s)\n",
-					inFile, written, filesize, errno, strerror(errno));
+					inFile, written, (long long) filesize, errno, strerror(errno));
 			if (backupName) {
 				fprintf(stderr, "\ta backup is available as %s\n", backupName);
 				xfree(backupName);
@@ -1180,7 +1177,8 @@ fail:
 				goto bail;
 			}
 			if (fwrite(inBuf, filesize, 1, in) != 1) {
-				fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
+				fprintf(stderr, "%s: Error writing to file (%lld bytes; %s)\n",
+						inFile, (long long) filesize, strerror(errno));
 				xfree(backupName);
 				goto bail;
 			}
@@ -1575,10 +1573,6 @@ int zfsctool(int argc, const char *argv[])
 		printUsage();
 		return(EINVAL);
 	}
-
-#if !__has_builtin(__builtin_available)
-#	warning "Please use clang 5 or newer if you can"
-#endif
 
 	for (i = 1; i < argc && argv[i][0] == '-'; i++) {
 		for (j = 1; j < strlen(argv[i]); j++) {

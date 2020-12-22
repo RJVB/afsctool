@@ -3057,17 +3057,19 @@ next_arg:;
 			if (applycomp)
 			{
 				if ((fileinfo.st_flags & UF_COMPRESSED) == 0) {
-					printf("Unable to compress file.\n");
-				} else {
-					printf("File is already HFS+/APFS compressed.\n");
+					printf("Unable to compress file %s.\n", fullpath);
 				}
+// at this point we could report that the file has been compressed, but that doesn't stroke with non-verbose mode.
+// 				else {
+// 					printf("File has been HFS+/APFS compressed.\n");
+// 				}
 			}
 			else
 			{
 				if ((fileinfo.st_flags & UF_COMPRESSED) != 0)
-					printf("File is HFS+/APFS compressed.\n");
+					printf("%s is HFS+/APFS compressed.\n", fullpath);
 				else
-					printf("File is not HFS+/APFS compressed.\n");
+					printf("%s is not HFS+/APFS compressed.\n", fullpath);
 			}
 		}
 #endif

@@ -728,6 +728,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				break;
 #ifdef HAS_LZVN
 			case LZVN:{
+				// store the current last 4 bytes of compressed file content (bogus the 1st time we come here)
 				UInt32 prevLast = ((UInt32*)outBufBlock)[cmpedsize/sizeof(UInt32)-1];
 				cmpedsize =
 					lzvn_encode(outBufBlock, lzvn_EstimatedCompressedSize, cursor, bytesAfterCursor, lzvn_WorkSpace);
@@ -761,9 +762,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				chunkTable = outBuf;
 				currBlock = outBuf + currBlockOffset;
 				currBlockLen = outBufSize;
+				// if not the 1st time we're here, check if the 4 bytes of compressed file contents
+				// just before the current position in the output buffer correspond to prevLast.
+				// If the test fails we may have a chunking overlap issue.
+				// It never happened to my knowledge, but this sanity check is cheap enough to keep.
 				if (blockNr > 1 && ((UInt32*)currBlock)[-1] != prevLast) {
 					fprintf(stderr, "%s: warning, possible chunking overlap: prevLast=%u currBlock[-1]=%u currBlock[0]=%u\n",
-						inFile, (uint32_t) prevLast, (uint32_t)((UInt32*)currBlock)[-sizeof(UInt32)], (uint32_t)((UInt32*)currBlock)[0]);
+						inFile, prevLast, ((UInt32*)currBlock)[-1], ((UInt32*)currBlock)[0]);
 				}
 				break;
 			}

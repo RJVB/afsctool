@@ -489,6 +489,42 @@ static inline void ExitThread(THREAD_RETURN dwExitCode)
 	pthread_exit((void*) dwExitCode);
 }
 
+/*
+ Emulates the Microsoft-specific intrinsic of the same name.
+ @n
+ Increments the value at the address pointed to by atomic with 1 in locked fashion,
+ i.e. preempting any other access to the same memory location
+ */
+static inline long _InterlockedIncrement( volatile long *atomic )
+{
+     __sync_add_and_fetch(atomic, 1);
+	return *atomic;
+}
+
+/*
+ Emulates the Microsoft-specific intrinsic of the same name.
+ @n
+ Decrements the value at the address pointed to by atomic with 1 in locked fashion,
+ i.e. preempting any other access to the same memory location
+ */
+static inline long _InterlockedDecrement( volatile long *atomic )
+{
+     __sync_sub_and_fetch(atomic, 1);
+	return *atomic;
+}
+
+/*
+ Emulates the Microsoft-specific intrinsic of the same name.
+ @n
+ Increments the value at the address pointed to by atomic with value val in locked fashion,
+ i.e. preempting any other access to the same memory location
+ */
+static inline long _InterlockedAdd64( volatile long long *atomic, long long val )
+{
+     __sync_add_and_fetch(atomic, val);
+	return *atomic;
+}
+
 #ifdef INTEL_CPU
 /**
  Emulates the Microsoft-specific intrinsic of the same name.
@@ -543,44 +579,33 @@ static inline PVOID InterlockedCompareExchangePointer( volatile PVOID *Destinati
 }
 #endif // !__MINGWxx__
 
-/*
- Emulates the Microsoft-specific intrinsic of the same name.
- @n
- Increments the value at the address pointed to by atomic with 1 in locked fashion,
- i.e. preempting any other access to the same memory location
- */
-static inline long _InterlockedIncrement( volatile long *atomic )
-{
-	__asm__ __volatile__ ("lock; addl %1,%0"
-			: "=m" (*atomic)
-			: "ir" (1), "m" (*atomic));
-	return *atomic;
-}
-
-/*
- Emulates the Microsoft-specific intrinsic of the same name.
- @n
- Increments the value at the address pointed to by atomic with value val in locked fashion,
- i.e. preempting any other access to the same memory location
- */
-static inline long _InterlockedAdd64( volatile long long *atomic, long long val )
-{
-     return __sync_add_and_fetch(atomic, val);
-}
-
-/*
- Emulates the Microsoft-specific intrinsic of the same name.
- @n
- Decrements the value at the address pointed to by atomic with 1 in locked fashion,
- i.e. preempting any other access to the same memory location
- */
-static inline long _InterlockedDecrement( volatile long *atomic )
-{
-	__asm__ __volatile__ ("lock; addl %1,%0"
-			: "=m" (*atomic)
-			: "ir" (-1), "m" (*atomic));
-	return *atomic;
-}
+// /*
+//  Emulates the Microsoft-specific intrinsic of the same name.
+//  @n
+//  Increments the value at the address pointed to by atomic with 1 in locked fashion,
+//  i.e. preempting any other access to the same memory location
+//  */
+// static inline long _InterlockedIncrement( volatile long *atomic )
+// {
+// 	__asm__ __volatile__ ("lock; addl %1,%0"
+// 			: "=m" (*atomic)
+// 			: "ir" (1), "m" (*atomic));
+// 	return *atomic;
+// }
+// 
+// /*
+//  Emulates the Microsoft-specific intrinsic of the same name.
+//  @n
+//  Decrements the value at the address pointed to by atomic with 1 in locked fashion,
+//  i.e. preempting any other access to the same memory location
+//  */
+// static inline long _InterlockedDecrement( volatile long *atomic )
+// {
+// 	__asm__ __volatile__ ("lock; addl %1,%0"
+// 			: "=m" (*atomic)
+// 			: "ir" (-1), "m" (*atomic));
+// 	return *atomic;
+// }
 
 static inline long _InterlockedAnd( volatile long *atomic, long val )
 {
@@ -612,7 +637,60 @@ static inline void YieldProcessor()
 //	__asm__ __volatile__("pause");
 #endif
 }
+
+#else // INTEL_CPU
+
+extern "C" void __yield(void);
+#pragma intrinsic(__yield)
+
+/*
+ Emulates the Microsoft-specific intrinsic of the same name.
+ @n
+ Signals to the processor to give resources to threads that are waiting for them.
+ This macro is only effective on processors that support technology allowing multiple threads
+ running on a single processor, such as Intel's Hyperthreading technology.
+ */
+static inline void YieldProcessor()
+{
+#ifdef __ARM64__
+	__yield();
 #endif
+}
+
+#endif // INTEL_CPU
+
+/**
+	set the referenced state variable to True in an atomic operation
+	(which avoids changing the state while another thread is reading it)
+ */
+static inline void _InterlockedSetTrue( volatile long *atomic )
+{
+	if /*while*/( !*atomic ){
+		if( !_InterlockedIncrement(atomic) ){
+			YieldProcessor();
+		}
+	}
+}
+
+/**
+	set the referenced state variable to False in an atomic operation
+	(which avoids changing the state while another thread is reading it)
+ */
+static inline void _InterlockedSetFalse( volatile long *atomic )
+{
+	while( *atomic ){
+		if( *atomic > 0 ){
+			if( _InterlockedDecrement(atomic) ){
+				YieldProcessor();
+			}
+		}
+		else{
+			if( _InterlockedIncrement(atomic) ){
+				YieldProcessor();
+			}
+		}
+	}
+}
 
 /**
  millisecond timer
@@ -685,39 +763,6 @@ static inline bool ReleaseMutex(HANDLE hMutex)
 		}
 	}
 	return true;
-}
-
-/**
-	set the referenced state variable to True in an atomic operation
-	(which avoids changing the state while another thread is reading it)
- */
-static inline void _InterlockedSetTrue( volatile long *atomic )
-{
-	if /*while*/( !*atomic ){
-		if( !_InterlockedIncrement(atomic) ){
-			YieldProcessor();
-		}
-	}
-}
-
-/**
-	set the referenced state variable to False in an atomic operation
-	(which avoids changing the state while another thread is reading it)
- */
-static inline void _InterlockedSetFalse( volatile long *atomic )
-{
-	while( *atomic ){
-		if( *atomic > 0 ){
-			if( _InterlockedDecrement(atomic) ){
-				YieldProcessor();
-			}
-		}
-		else{
-			if( _InterlockedIncrement(atomic) ){
-				YieldProcessor();
-			}
-		}
-	}
 }
 
 static inline bool SetEvent( HANDLE hEvent )

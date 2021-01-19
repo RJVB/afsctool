@@ -153,7 +153,6 @@
 #	endif
 #endif // CRITSECTGCC
 
-#ifdef INTEL_CPU
 #ifdef __cplusplus
 static inline void _InterlockedSetTrue( volatile long &atomic )
 {
@@ -208,7 +207,6 @@ static inline void _InterlockedSetFalse( volatile long *atomic )
 	}
 }
 #endif //_MSEMUL_H
-#endif
 
 #if defined(__cplusplus)
 #if defined(MUTEXEX_CAN_TIMEOUT) && defined(__APPLE__)

@@ -139,7 +139,11 @@
 	extern void cseAssertEx(bool, const char *, int);
 #endif
 
-#if defined(__GNUC__) && (defined(i386) || defined(__i386__) || defined(__x86_64__) || defined(_MSEMUL_H))
+#if defined(i386) || defined(__i386__) || defined(__x86_64__)
+#	define INTEL_CPU
+#endif
+
+#if defined(__GNUC__) && (defined(INTEL_CPU) || defined(_MSEMUL_H))
 
 #	define CRITSECTGCC
 
@@ -149,6 +153,7 @@
 #	endif
 #endif // CRITSECTGCC
 
+#ifdef INTEL_CPU
 #ifdef __cplusplus
 static inline void _InterlockedSetTrue( volatile long &atomic )
 {
@@ -203,6 +208,7 @@ static inline void _InterlockedSetFalse( volatile long *atomic )
 	}
 }
 #endif //_MSEMUL_H
+#endif
 
 #if defined(__cplusplus)
 #if defined(MUTEXEX_CAN_TIMEOUT) && defined(__APPLE__)

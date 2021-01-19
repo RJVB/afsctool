@@ -37,6 +37,10 @@
 
 #endif //SWIG
 
+#if defined(i386) || defined(__i386__) || defined(__x86_64__)
+#	define INTEL_CPU
+#endif
+
 #if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
 #	include "CritSectEx/msemul4win.h"
 #	include "timing.h"
@@ -484,7 +488,8 @@ static inline void ExitThread(THREAD_RETURN dwExitCode)
 {
 	pthread_exit((void*) dwExitCode);
 }
-				
+
+#ifdef INTEL_CPU
 /**
  Emulates the Microsoft-specific intrinsic of the same name.
  @n
@@ -607,6 +612,7 @@ static inline void YieldProcessor()
 //	__asm__ __volatile__("pause");
 #endif
 }
+#endif
 
 /**
  millisecond timer

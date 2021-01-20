@@ -27,7 +27,7 @@
 #	include "private/lzfse/src/lzfse_internal.h"
 #endif
 #ifdef HAS_LZFSE
-#	include <lzfse.h>
+#	include "private/lzfse/src/lzfse.h"
 #endif
 
 #include <sys/mman.h>

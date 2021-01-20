@@ -59,6 +59,8 @@ mode adopts the approach also used for LZVN compression, where the memory buffer
 as needed and thus only gets as large as needed (typically 4-5x smaller than in the singleshot
 mode). Singleshot mode might be marginally faster when enough RAM is available.
 
+Version 1.7.1 introduces compression support for LZFSE when the LZFSE library is available
+(through the OS or from https://github.com/lzfse/lzfse).
 
 ### Installation
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
 
-project(afsctool VERSION 1.7.0)
+project(afsctool VERSION 1.7.0.9)
 set(afsctool_FULL_VERSION "${afsctool_VERSION_MAJOR}.${afsctool_VERSION_MINOR}.${afsctool_VERSION_PATCH}.${afsctool_VERSION_TWEAK}")
 
 include(CheckTypeSize)
@@ -61,6 +61,9 @@ if(APPLE)
     find_file(LZVN_HEADER "FastCompression.h")
     find_library(LZVN_LIBRARY "FastCompression")
     message(STATUS "LZVN_HEADER,LIB: ${LZVN_HEADER} ${LZVN_LIBRARY}")
+    find_file(LZFSE_HEADER "lzfse.h")
+    find_library(LZFSE_LIBRARY "lzfse")
+    message(STATUS "LZFSE_HEADER,LIB: ${LZFSE_HEADER} ${LZFSE_LIBRARY}")
     include_directories(${ZLIBP_INCLUDE_DIR})
 endif()
 
@@ -83,6 +86,15 @@ if(APPLE)
     else()
         message(STATUS "LZVN support is disabled")
         unset(LZVN_LIBRARY)
+    endif()
+    if(LZFSE_HEADER AND LZFSE_LIBRARY)
+        message(STATUS "Enabling LZFSE support")
+        add_definitions(-DHAS_LZFSE)
+        get_filename_component(LZFSE_INCLUDE_DIR ${LZFSE_HEADER} DIRECTORY)
+        include_directories(${LZFSE_INCLUDE_DIR})
+    else()
+        message(STATUS "LZFSE support is disabled")
+        unset(LZFSE_LIBRARY)
     endif()
 endif()
 
@@ -115,6 +127,8 @@ add_library(PP OBJECT
     src/CritSectEx/timing.c
 )
 
+# add_subdirectory(src/private/lzfse)
+
 if (NEW_DRIVER_NAMES)
     set(AFSCTOOL "afscompress")
     set(ZFSCTOOL "zfscompress")
@@ -139,6 +153,9 @@ set_target_properties(${AFSCTOOL} PROPERTIES
 target_link_libraries(${AFSCTOOL} ${ZLIBP_LIBRARIES} ${PKG_SPARSEHASH_LIBRARIES})
 if(LZVN_LIBRARY)
     target_link_libraries(${AFSCTOOL} ${LZVN_LIBRARY})
+endif()
+if(LZFSE_LIBRARY)
+    target_link_libraries(${AFSCTOOL} ${LZFSE_LIBRARY})
 endif()
 if(APPLE)
     target_link_libraries(${AFSCTOOL} "-framework CoreServices")

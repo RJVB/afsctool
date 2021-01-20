@@ -84,11 +84,12 @@ typedef struct __attribute__((packed)) {
 	UInt32 spacer2;
 } decmpfs_resource_zlib_trailer;
 
-#ifdef HAS_LZVN
-	// LZVN decmpfs compression starts with a table of 4-byte offsets into the resource
-	// fork, terminated with the offset where no more compressed data is to be found.
-	// The first offset is thus also sizeof(UInt32) (4) times the size of the table.
-	typedef UInt32 lzvn_chunk_table;
+#if defined HAS_LZVN || defined HAS_LZFSE
+	// LZVN/LZFSE decmpfs compression starts with a table of 4-byte offsets into the
+	// resource fork, terminated with the offset where no more compressed data is to be
+	// found. The first offset is thus also sizeof(UInt32) (4) times the size of the
+	//table.
+	typedef UInt32 lz_chunk_table;
 #endif
 
 extern int afsctool (int argc, const char * argv[]);

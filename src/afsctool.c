@@ -24,7 +24,7 @@
 
 #include <zlib.h>
 #ifdef HAS_LZVN
-#	include <FastCompression.h>
+#	include "private/lzfse/src/lzfse_internal.h"
 #endif
 #ifdef HAS_LZFSE
 #	include <lzfse.h>
@@ -234,14 +234,17 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, int comptyp
 	}
 #endif
 #ifdef HAS_LZVN
-	// the LZVN compressor we use fails on buffers that too small, so we need to verify
+	// the LZVN compressor we use fails on buffers that are too small, so we need to verify
 	// if the file gets to be split into chunks that are all large enough.
-	if (comptype == LZVN && (inFileInfo->st_size % 0x10000) < LZVN_MINIMUM_COMPRESSABLE_SIZE) {
-		if (printVerbose >= 2) {
-			fprintf( stderr, "\"%s\": file too small or will contain a too small compression chunk (try ZLIB compression)\n",
-					 inFile);
+	if (comptype == LZVN){
+		int lastChunkSize = inFileInfo->st_size % 0x10000;
+		if (lastChunkSize > 0 && lastChunkSize < LZVN_ENCODE_MIN_SRC_SIZE) {
+			if (printVerbose >= 2) {
+				fprintf( stderr, "\"%s\": file too small or will contain a too small compression chunk (try ZLIB compression)\n",
+						 inFile);
+			}
+			return false;
 		}
-		return false;
 	}
 #endif
 #ifdef VOL_CAP_FMT_DECMPFS_COMPRESSION
@@ -609,7 +612,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 #ifdef HAS_LZVN
 		case LZVN: {
-			cmpedsize = lz_EstimatedCompressedSize = MAX(lzvn_encode_work_size(), compblksize);
+			cmpedsize = lz_EstimatedCompressedSize = MAX(lzvn_encode_scratch_size(), compblksize);
 			lz_WorkSpace = malloc(cmpedsize);
 			// for this compressor we will let the outBuf grow incrementally. Slower,
 			// but use only as much memory as required.
@@ -760,7 +763,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				// store the current last 4 bytes of compressed file content (bogus the 1st time we come here)
 				UInt32 prevLast = ((UInt32*)outBufBlock)[cmpedsize/sizeof(UInt32)-1];
 				cmpedsize =
-					lzvn_encode(outBufBlock, lz_EstimatedCompressedSize, cursor, bytesAfterCursor, lz_WorkSpace);
+					lzvn_encode_buffer(outBufBlock, lz_EstimatedCompressedSize, cursor, bytesAfterCursor, lz_WorkSpace);
 				if (cmpedsize <= 0)
 				{
 					fprintf( stderr, "%s: lzvn compression failed on chunk #%d (of %u; %lu bytes)\n",

@@ -62,6 +62,11 @@ mode). Singleshot mode might be marginally faster when enough RAM is available.
 Version 1.7.1 introduces compression support for LZFSE when the LZFSE library is available
 (through the OS or from https://github.com/lzfse/lzfse).
 
+Version 1.7.2 drops the dependency on my LZVN repo, replacing it with the LZFSE reference
+implementation also used for LZFSE support. It turns out that this library also has a pure
+C implementation of LZVN compression, making it compatible with Apple's new CPU architecture.
+To ease the transition, github:lzfse/lzfse is included as a git submodule and linked statically.
+
 ### Installation
 
 afsctool depends on zlib (v1.2.8 or newer) and Google's sparsehash library and on CMake

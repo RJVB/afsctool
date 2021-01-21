@@ -1,11 +1,11 @@
-# This is my version of brkirch's afsctool
+# afcstool
 
 > AFSC (Apple File System Compression) tool is a utility that can be used
 to apply HFS+ compression to file(s), decompress HFS+ compressed file(s), or
 get information about existing HFS+ compressed file(s).
 Mac OS 10.6 or later is required. See: https://brkirch.wordpress.com/afsctool/
 
-I have made several modifications, mostly concerning the compression feature:
+I (RJVB) have made several modifications, mostly concerning the compression feature:
 - improved error reporting
 - an attempt to reduce memory pressure compressing large files
 - support for multiple files/folders specified on the commandline
@@ -14,7 +14,6 @@ I have made several modifications, mostly concerning the compression feature:
 - support for files that are read-only (and/or write-only) by changing their permissions
   temporarily. No error checking is done for this feature; failure will lead to
   errors that are already caught.
-
 
 The main new feature that justifies the version bump, however, is the parallel
 processing feature, allowing the user to specify an arbitray (though positive :))
@@ -27,6 +26,7 @@ This feature has two modes that each perform best in specific conditions:
   state disks, file collections that reside on different disks or collections with
   files of different sizes (including notably very large files). This mode is
   selected with the -J option.
+
 The performance difference is never enormous in my testing, but YMMV.
 
 Interestingly, the optimum performance (on large collections) is not necessarily
@@ -53,14 +53,14 @@ and later. Currently only LZVN support is fully implemented (though decompressio
 should work if the OS supports it). Note that LZVN support requires a headerfile not
 currently installed by the original author's LZVN repo; use my fork instead and build it
 with cmake. --> https://github.com/RJVB/LZVN
+
 This version also makes the current ZLIB compression mode optional, that uses a compression
 buffer that is allocated all at once (and is thus almost always too large. The new default
 mode adopts the approach also used for LZVN compression, where the memory buffer is grown
 as needed and thus only gets as large as needed (typically 4-5x smaller than in the singleshot
 mode). Singleshot mode might be marginally faster when enough RAM is available.
 
-
-### Installation
+## Installation
 
 afsctool depends on zlib (v1.2.8 or newer) and Google's sparsehash library and on CMake
 and pkgconfig for building. The OS zlib copy may be recent enough (it is on 10.12 and later) but to be
@@ -68,12 +68,12 @@ certain to obtain the latest versions of both, use a package manager like MacPor
 or HomeBrew. Be sure to follow the general installation and usage instructions for those
 projects, in particular how to update your PATH.
 
-# using MacPorts:
+### Using MacPorts:
 ```shell
 port install sparsehash zlib cmake pkgconfig
 ```
 
-# using HomeBrew:
+### Using HomeBrew:
 ```shell
 brew install google-sparsehash zlib cmake pkgconfig
 PKG_CONFIG_PATH=/usr/local/opt/zlib/lib/pkgconfig
@@ -98,11 +98,8 @@ cd afsctool/build
 sudo make install/fast V=1 VERBOSE=1
 ```
 
-# A word about the other executable (zfsctool)
-
+## zfcstool
 This repository also builds another utility, `zfsctool`.
-
-## zfsctool
 
 This is a stripped-down and adapted version of `afsctool`, aiming to provide a comparable
 offline/post-hoc *re*compression of selected files and folders on ZFS as `afsctool` does

@@ -404,7 +404,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	if (filesize > maxSize && maxSize != 0){
 		if (folderinfo->print_info > 2)
 		{
-			fprintf( stderr, "Skipping file %s size %lld > max size %lld\n", inFile, filesize, maxSize );
+			fprintf( stderr, "Skipping file %s size %lld > max size %lld\n", inFile, (long long) filesize, maxSize );
 		}
 		return;
 	}
@@ -462,7 +462,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	numBlocks = (filesize + compblksize - 1) / compblksize;
 	// TODO: make compression-type specific (as far as that's possible).
 	if ((filesize + 0x13A + (numBlocks * 9)) > CMP_MAX_SUPPORTED_SIZE) {
-		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
+		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, (long long) filesize );
 		return;
 	} else if (filesize >= 64 * 1024 * 1024) {
 		// use a rather arbitrary threshold above which using mmap may be of interest
@@ -494,7 +494,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		// reused more easily.
 		inBuf = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE|MAP_NOCACHE, fdIn, 0);
 		if (inBuf == MAP_FAILED) {
-			fprintf(stderr, "%s: Error m'mapping file (size %lld; %s)\n", inFile, filesize, strerror(errno));
+			fprintf(stderr, "%s: Error m'mapping file (size %lld; %s)\n", inFile, (long long) filesize, strerror(errno));
 			useMmap = false;
 		} else {
 			madvise(inBuf, filesize, MADV_RANDOM);
@@ -506,7 +506,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		inBuf = malloc(filesize);
 		if (inBuf == NULL)
 		{
-			fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, filesize, strerror(errno));
+			fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, (long long) filesize, strerror(errno));
 			xclose(fdIn);
 			utimes(inFile, times);
 			return;
@@ -925,7 +925,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			if (printVerbose > 2) {
 				fprintf(stderr,
 					"%s: compressed size (%lld) doesn't give required savings (%g) or larger than original (%lld)\n",
-					inFile, newSize, minSavings, filesize);
+					inFile, newSize, minSavings, (long long) filesize);
 			}
 			goto bail;
 		}
@@ -1906,7 +1906,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		}
 		if (hasRF)
 		{
-			printf("File data fork size: %lld bytes\n", fileinfo->st_size);
+			printf("File data fork size: %lld bytes\n", (long long) fileinfo->st_size);
 			printf("File resource fork size: %ld bytes\n", RFsize);
             if (compattrsize && printVerbose > 2)
                 printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);

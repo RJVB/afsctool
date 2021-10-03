@@ -37,15 +37,15 @@ extern DWORD thread2ThreadKey, thread2ThreadKeyClients;
 class Thread_Exception : public std::exception {
 public:
 	const char *errorMessage;
-	Thread_Exception() throw()
+	Thread_Exception() noexcept
 	{
 		errorMessage = "";
 	}
-	Thread_Exception(const char *msg) throw()
+	Thread_Exception(const char *msg) noexcept
 	{
 		errorMessage = msg;
 	}
-	virtual const char* what() const throw()
+	virtual const char* what() const noexcept
 	{
 		return errorMessage;
 	}
@@ -68,7 +68,7 @@ class Thread {
 			new() operator that allocates from anonymous shared memory - necessary to be able
 			to share semaphore handles among processes
 		 */
-		void *operator new(size_t size) throw(std::bad_alloc)
+		void *operator new(size_t size) noexcept(false)
 		{ extern void *MSEreallocShared( void* ptr, size_t N, size_t oldN );
 		  void *p = MSEreallocShared( NULL, size, 0 );
 			if( p ){
@@ -265,11 +265,11 @@ class Thread {
 		 */
 		Thread( SuspenderThreadTypes when, void* arg = NULL );
 		Thread( int when, void* arg = NULL );
-		Thread( Thread & ) throw(const char*)
+		Thread( Thread & ) noexcept(false)
 		{
 			throw "Thread instance copying is undefined";
 		}
-		Thread( const Thread & ) throw(const char*)
+		Thread( const Thread & ) noexcept(false)
 		{
 			throw "Thread instance copying is undefined";
 		}

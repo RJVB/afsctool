@@ -54,11 +54,11 @@
 			{
 				msg = s;
 			}
-			virtual const char* what() const throw()
+			virtual const char* what() const noexcept
 			{
 				return msg;
 			}
-			virtual const int code() const throw()
+			virtual const int code() const noexcept
 			{
 				return errcode;
 			}
@@ -108,7 +108,7 @@
 #endif
 
 #ifdef __cplusplus
-	__forceinline static void cseAssertExInline(bool expected, const char *fileName, int linenr, const char *title="CritSectEx malfunction", const char *arg=NULL) throw(cseAssertFailure)
+	__forceinline static void cseAssertExInline(bool expected, const char *fileName, int linenr, const char *title="CritSectEx malfunction", const char *arg=NULL) noexcept(false)
 #else
 	__forceinline static void cseAssertExInline(void *expected, const char *fileName, int linenr, const char *title, const char *arg)
 #endif

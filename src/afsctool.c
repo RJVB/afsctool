@@ -24,7 +24,10 @@
 
 #include <zlib.h>
 #ifdef HAS_LZVN
-#	include <FastCompression.h>
+#	include "private/lzfse/src/lzfse_internal.h"
+#endif
+#ifdef HAS_LZFSE
+#	include "private/lzfse/src/lzfse.h"
 #endif
 
 #include <sys/mman.h>
@@ -231,14 +234,17 @@ bool fileIsCompressable(const char *inFile, struct stat *inFileInfo, int comptyp
 	}
 #endif
 #ifdef HAS_LZVN
-	// the LZVN compressor we use fails on buffers that too small, so we need to verify
+	// the LZVN compressor we use fails on buffers that are too small, so we need to verify
 	// if the file gets to be split into chunks that are all large enough.
-	if (comptype == LZVN && (inFileInfo->st_size % 0x10000) < LZVN_MINIMUM_COMPRESSABLE_SIZE) {
-		if (printVerbose >= 2) {
-			fprintf( stderr, "\"%s\": file too small or will contain a too small compression chunk (try ZLIB compression)\n",
-					 inFile);
+	if (comptype == LZVN){
+		int lastChunkSize = inFileInfo->st_size % 0x10000;
+		if (lastChunkSize > 0 && lastChunkSize < LZVN_ENCODE_MIN_SRC_SIZE) {
+			if (printVerbose >= 2) {
+				fprintf( stderr, "\"%s\": file too small or will contain a too small compression chunk (try ZLIB compression)\n",
+						 inFile);
+			}
+			return false;
 		}
-		return false;
 	}
 #endif
 #ifdef VOL_CAP_FMT_DECMPFS_COMPRESSION
@@ -358,8 +364,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	ssize_t xattrnamesize, outBufSize = 0;
 	UInt32 cmpf = DECMPFS_MAGIC, orig_mode;
 	struct timeval times[2];
-#ifdef HAS_LZVN
-	void *lzvn_WorkSpace = NULL;
+#if defined HAS_LZVN || defined HAS_LZFSE
+	void *lz_WorkSpace = NULL;
 #endif
 	bool supportsLargeBlocks;
 	bool useMmap = false;
@@ -398,7 +404,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	if (filesize > maxSize && maxSize != 0){
 		if (folderinfo->print_info > 2)
 		{
-			fprintf( stderr, "Skipping file %s size %lld > max size %lld\n", inFile, filesize, maxSize );
+			fprintf( stderr, "Skipping file %s size %lld > max size %lld\n", inFile, (long long) filesize, maxSize );
 		}
 		return;
 	}
@@ -456,7 +462,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	numBlocks = (filesize + compblksize - 1) / compblksize;
 	// TODO: make compression-type specific (as far as that's possible).
 	if ((filesize + 0x13A + (numBlocks * 9)) > CMP_MAX_SUPPORTED_SIZE) {
-		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, filesize );
+		fprintf( stderr, "Skipping file %s with unsupportable size %lld\n", inFile, (long long) filesize );
 		return;
 	} else if (filesize >= 64 * 1024 * 1024) {
 		// use a rather arbitrary threshold above which using mmap may be of interest
@@ -488,7 +494,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		// reused more easily.
 		inBuf = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE|MAP_NOCACHE, fdIn, 0);
 		if (inBuf == MAP_FAILED) {
-			fprintf(stderr, "%s: Error m'mapping file (size %lld; %s)\n", inFile, filesize, strerror(errno));
+			fprintf(stderr, "%s: Error m'mapping file (size %lld; %s)\n", inFile, (long long) filesize, strerror(errno));
 			useMmap = false;
 		} else {
 			madvise(inBuf, filesize, MADV_RANDOM);
@@ -500,7 +506,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		inBuf = malloc(filesize);
 		if (inBuf == NULL)
 		{
-			fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, filesize, strerror(errno));
+			fprintf(stderr, "%s: malloc error, unable to allocate input buffer of %lld bytes (%s)\n", inFile, (long long) filesize, strerror(errno));
 			xclose(fdIn);
 			utimes(inFile, times);
 			return;
@@ -583,10 +589,10 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		UInt32 xattr, resourceFork;
 	} compressionType;
 	uLong zlib_EstimatedCompressedChunkSize;
-#ifdef HAS_LZVN
-	size_t lzvn_EstimatedCompressedSize;
+#if defined HAS_LZVN || defined HAS_LZFSE
+	size_t lz_EstimatedCompressedSize;
 
-	lzvn_chunk_table *chunkTable = (lzvn_chunk_table*) outBuf;
+	lz_chunk_table *chunkTable = (lz_chunk_table*) outBuf;
 	ssize_t chunkTableByteSize;
 #endif
 
@@ -606,13 +612,13 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 #ifdef HAS_LZVN
 		case LZVN: {
-			cmpedsize = lzvn_EstimatedCompressedSize = MAX(lzvn_encode_work_size(), compblksize);
-			lzvn_WorkSpace = malloc(cmpedsize);
+			cmpedsize = lz_EstimatedCompressedSize = MAX(lzvn_encode_scratch_size(), compblksize);
+			lz_WorkSpace = malloc(cmpedsize);
 			// for this compressor we will let the outBuf grow incrementally. Slower,
 			// but use only as much memory as required.
 			outBuf = calloc(numBlocks, sizeof(chunkTable));
 			chunkTable = outBuf;
-			if (!lzvn_WorkSpace || !chunkTable) {
+			if (!lz_WorkSpace || !chunkTable) {
 				fprintf(stderr,
 						"%s: malloc error, unable to allocate %lu bytes for lzvn workspace or %u element chunk table(%s)\n",
 						inFile, cmpedsize, numBlocks, strerror(errno));
@@ -625,6 +631,27 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			chunkTable[0] = chunkTableByteSize;
 			break;
 		}
+#endif
+#ifdef HAS_LZFSE
+		case LZFSE:
+			cmpedsize = lz_EstimatedCompressedSize = MAX(lzfse_encode_scratch_size(), compblksize);
+			lz_WorkSpace = lz_EstimatedCompressedSize ? malloc(lz_EstimatedCompressedSize) : 0;
+			// for this compressor we will let the outBuf grow incrementally. Slower,
+			// but use only as much memory as required.
+			outBuf = calloc(numBlocks, sizeof(chunkTable));
+			chunkTable = outBuf;
+			if ((!lz_WorkSpace && lz_EstimatedCompressedSize) || !chunkTable) {
+				fprintf(stderr,
+						"%s: malloc error, unable to allocate %lu bytes for lzfse workspace or %u element chunk table(%s)\n",
+						inFile, cmpedsize, numBlocks, strerror(errno));
+				utimes(inFile, times);
+				goto bail;
+			}
+			struct compressionType t = {CMP_LZFSE_XATTR, CMP_LZFSE_RESOURCE_FORK};
+			compressionType = t;
+			outBufSize = chunkTableByteSize = numBlocks * sizeof(chunkTable);
+			chunkTable[0] = chunkTableByteSize;
+			break;
 #endif
 		default:
 			fprintf(stderr, "%s: unsupported compression type %d (%s)\n",
@@ -685,6 +712,11 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			supportsLargeBlocks = false;
 			break;
 #endif
+#ifdef HAS_LZFSE
+		case LZFSE:
+			supportsLargeBlocks = false;
+			break;
+#endif
 		default:
 			// noop
 			break;
@@ -731,7 +763,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				// store the current last 4 bytes of compressed file content (bogus the 1st time we come here)
 				UInt32 prevLast = ((UInt32*)outBufBlock)[cmpedsize/sizeof(UInt32)-1];
 				cmpedsize =
-					lzvn_encode(outBufBlock, lzvn_EstimatedCompressedSize, cursor, bytesAfterCursor, lzvn_WorkSpace);
+					lzvn_encode_buffer(outBufBlock, lz_EstimatedCompressedSize, cursor, bytesAfterCursor, lz_WorkSpace);
 				if (cmpedsize <= 0)
 				{
 					fprintf( stderr, "%s: lzvn compression failed on chunk #%d (of %u; %lu bytes)\n",
@@ -770,6 +802,45 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 					fprintf(stderr, "%s: warning, possible chunking overlap: prevLast=%u currBlock[-1]=%u currBlock[0]=%u\n",
 						inFile, prevLast, ((UInt32*)currBlock)[-1], ((UInt32*)currBlock)[0]);
 				}
+				break;
+			}
+#endif
+#ifdef HAS_LZFSE
+			case LZFSE:{
+				cmpedsize = lz_EstimatedCompressedSize;
+				while (1) {
+					cmpedsize = lzfse_encode_buffer(outBufBlock, cmpedsize, cursor, bytesAfterCursor, lz_WorkSpace);
+						// If output buffer was too small, grow and retry.
+					if (cmpedsize == 0) {
+						cmpedsize <<= 1;
+						if (!(outBufBlock = reallocf(outBufBlock, cmpedsize))) {
+							fprintf(stderr, "%s: malloc error, unable to increase output buffer to %lu bytes (%s)\n",
+									inFile, cmpedsize, strerror(errno));
+							utimes(inFile, times);
+							goto bail;
+						}
+						continue;
+					}
+					break;
+				}
+				// next offset will start at this offset
+				if (blockNr < numBlocks) {
+					chunkTable[blockNr + 1] = chunkTable[blockNr] + cmpedsize;
+				}
+				if (currBlockOffset == 0) {
+					currBlockOffset = outBufSize;
+				} 
+				outBufSize += cmpedsize;
+				if (!(outBuf = reallocf(outBuf, outBufSize))) {
+					fprintf(stderr, "%s: malloc error, unable to increase output buffer to %lu bytes (%s)\n",
+							inFile, outBufSize, strerror(errno));
+					utimes(inFile, times);
+					goto bail;
+				}
+				// update this one!
+				chunkTable = outBuf;
+				currBlock = outBuf + currBlockOffset;
+				currBlockLen = outBufSize;
 				break;
 			}
 #endif
@@ -821,8 +892,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 		}
 	}
 	// deallocate memory that isn't needed anymore.
-#ifdef HAS_LZVN
-	xfree(lzvn_WorkSpace);
+#if defined HAS_LZVN || defined HAS_LZFSE
+	xfree(lz_WorkSpace);
 #endif
 	free(outBufBlock); outBufBlock = NULL;
 
@@ -854,7 +925,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			if (printVerbose > 2) {
 				fprintf(stderr,
 					"%s: compressed size (%lld) doesn't give required savings (%g) or larger than original (%lld)\n",
-					inFile, newSize, minSavings, filesize);
+					inFile, newSize, minSavings, (long long) filesize);
 			}
 			goto bail;
 		}
@@ -927,6 +998,28 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 				folderinfo->data_compressed_size = outBufSize;
 				break;
 			}
+#endif
+#ifdef HAS_LZFSE
+			case LZFSE:
+#ifdef __APPLE__
+				ftruncate(fdIn, 0);
+				lseek(fdIn, SEEK_SET, 0);
+				if (setxattr(inFile, XATTR_RESOURCEFORK_NAME, outBuf, outBufSize, 0,
+					XATTR_NOFOLLOW | XATTR_CREATE) < 0)
+				{
+					fprintf(stderr, "%s: setxattr(%d): %s (%d)\n", inFile, fdIn, strerror(errno), __LINE__);
+					restoreFile();
+					goto bail;
+				}
+				isTruncated = true;
+#else
+				if (printVerbose > 2) {
+					fprintf(stderr, "# setxattr(XATTR_RESOURCEFORK_NAME) outBuf=%p len=%lu\n",
+							outBuf, outBufSize);
+				}
+#endif
+				folderinfo->data_compressed_size = outBufSize;
+				break;
 #endif
 			default:
 				// noop
@@ -1125,8 +1218,8 @@ bail:
 	xfree(outBuf);
 	xfree(outdecmpfsBuf);
 	xfree(outBufBlock);
-#ifdef HAS_LZVN
-	xfree(lzvn_WorkSpace);
+#if defined HAS_LZVN || defined HAS_LZFSE
+	xfree(lz_WorkSpace);
 #endif
 }
 
@@ -1456,17 +1549,9 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			}
 			break;
 		}
-		case CMP_LZFSE_XATTR:
 		case CMP_LZFSE_RESOURCE_FORK: {
-#ifdef DEBUG
-			{ FILE *cfp = fopen("/tmp/afsctool-last-lzfse-rfork.bin", "w");
-				if (cfp) {
-					fwrite(inBuf, inRFLen, 1, cfp);
-					fclose(cfp);
-				}
-			}
-#endif
-
+			removeResourceFork = true;
+		case CMP_LZFSE_XATTR:
 	        if (
 #if __has_builtin(__builtin_available)
 				// we can do simplified runtime OS version detection: accept LZFSE on 10.11 and up.
@@ -1821,7 +1906,7 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 		}
 		if (hasRF)
 		{
-			printf("File data fork size: %lld bytes\n", fileinfo->st_size);
+			printf("File data fork size: %lld bytes\n", (long long) fileinfo->st_size);
 			printf("File resource fork size: %ld bytes\n", RFsize);
             if (compattrsize && printVerbose > 2)
                 printf("File DECMPFS attribute size: %ld bytes\n", compattrsize);
@@ -2349,7 +2434,7 @@ void printUsage()
 		   "-S sort the item list by file size (leaving the largest files to the end may be beneficial if the target volume is almost full)\n"
 		   "-RM <M> of the <N> workers will work the item list (must be sorted!) in reverse order, starting with the largest files\n"
 #endif
-		   "-T <compressor> Compression type to use: ZLIB (= types 3,4) or LZVN (= types 7,8)\n"
+		   "-T <compressor> Compression type to use: ZLIB (= types 3,4), LZVN (= types 7,8), or LZFSE (= types 11,12)\n"
 		   "-<level> Compression level to use when compressing (ZLIB only; ranging from 1 to 9, with 1 being the fastest and 9 being the best - default is 5)\n"
 		  , AFSCTOOL_FULL_VERSION_STRING);
 }
@@ -2578,9 +2663,27 @@ int afsctool (int argc, const char * argv[])
 						fprintf(stderr, "Sorry, LZVN compression has not been enabled in this build.\n");
 						exit(EINVAL);
 #endif
+					} else if (strcasecmp(argv[i], "lzfse") == 0) {
+#ifdef HAS_LZFSE
+						if(
+#if __has_builtin(__builtin_available)
+							__builtin_available(macOS 10.11, *)
+#else
+							darwinMajor >= 15
+#endif
+						) {
+							// accept LZFSE on 10.11 and up.
+							compressiontype = LZFSE;
+						} else {
+							fprintf(stderr, "Sorry, LZFSE compression is supported from OS X 10.11 and up\n");
+							exit(EINVAL);
+						}
+#else // !HAS_LZFSE
+						fprintf(stderr, "Sorry, LZFSE compression has not been enabled in this build.\n");
+						exit(EINVAL);
+#endif
 					} else {
 						fprintf(stderr, "Unsupported or unknown HFS compression requested (%s)\n", argv[i]);
-// 						fprintf(stderr, "\tLZFSE compression will be supported from OS X 10.11 and up (not yet implemented)\n");
 						printUsage();
 						exit(EINVAL);
 					}

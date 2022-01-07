@@ -315,7 +315,7 @@ protected:
 	bool hasInfo;
 #ifdef __MACH__
 	thread_basic_info_data_t threadInfo;
-#elif defined(linux)
+#elif defined(CLOCK_THREAD_CPUTIME_ID)
 	volatile double cpuTime;
 #endif
 	friend class ParallelFileProcessor;

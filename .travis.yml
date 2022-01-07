@@ -5,9 +5,7 @@ install:
 env:
 - PKG_CONFIG_PATH=/usr/local/opt/zlib/lib/pkgconfig
 before_script:
-- git clone https://github.com/RJVB/lzvn
-- mkdir lzvn/build
-- pushd lzvn/build && cmake -Wno-dev .. && make && sudo make install/fast && popd
+- git submodule update --init
 script:
 - mkdir build
 - cd build

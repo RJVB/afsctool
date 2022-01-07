@@ -172,7 +172,7 @@ typedef void*		LPVOID;
 		 new() operator that allocates from anonymous shared memory - necessary to be able
 		 to share semaphore handles among processes
 		 */
-		void *operator new(size_t size) throw(std::bad_alloc)
+		void *operator new(size_t size) noexcept (false)
 		{ extern void *MSEreallocShared( void* ptr, size_t N, size_t oldN );
 		  void *p = MSEreallocShared( NULL, size, 0 );
 			if( p ){
@@ -339,7 +339,7 @@ typedef void*		LPVOID;
 				Initialise a HANDLE from an existing pthread identifier
 			 */
 			MSHANDLE(pthread_t fromThread);
-			MSHANDLE( const MSHANDLE &h ) throw(char*)
+			MSHANDLE( const MSHANDLE &h ) noexcept (false)
 			{
 				throw "MSHANDLE instance copying is undefined";
 			}

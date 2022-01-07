@@ -59,6 +59,13 @@ mode adopts the approach also used for LZVN compression, where the memory buffer
 as needed and thus only gets as large as needed (typically 4-5x smaller than in the singleshot
 mode). Singleshot mode might be marginally faster when enough RAM is available.
 
+Version 1.7.1 introduces compression support for LZFSE when the LZFSE library is available
+(through the OS or from https://github.com/lzfse/lzfse).
+
+Version 1.7.2 drops the dependency on my LZVN repo, replacing it with the LZFSE reference
+implementation also used for LZFSE support. It turns out that this library also has a pure
+C implementation of LZVN compression, making it compatible with Apple's new CPU architecture.
+To ease the transition, github:lzfse/lzfse is included as a git submodule and linked statically.
 
 ### Installation
 
@@ -83,7 +90,7 @@ PKG_CONFIG_PATH=/usr/local/opt/zlib/lib/pkgconfig
 ## Compile
 With the dependencies installed you can now build afsctool. In a directory of your choice:
 ```shell
-git clone git://github.com/RJVB/afsctool
+git clone --recurse-submodules git://github.com/RJVB/afsctool
 mkdir afsctool/build
 cd afsctool/build
 cmake -Wno-dev ..

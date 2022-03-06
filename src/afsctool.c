@@ -86,7 +86,7 @@
 #endif
 
 // use a hard-coded count so all arrays are always sized equally (and the compiler can warn better)
-const int sizeunits = 6;
+#define sizeunits 6
 const char *sizeunit10_short[sizeunits] = {"KB", "MB", "GB", "TB", "PB", "EB"};
 const char *sizeunit10_long[sizeunits] = {"kilobytes", "megabytes", "gigabytes", "terabytes", "petabytes", "exabytes"};
 const long long int sizeunit10[sizeunits] = {1000, 1000 * 1000, 1000 * 1000 * 1000, (long long int) 1000 * 1000 * 1000 * 1000,

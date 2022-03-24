@@ -2277,7 +2277,6 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 								if (xattrsize < 0)
 								{
 									fprintf(stderr, "getxattr: %s\n", strerror(errno));
-									free(xattrnames);
 									continue;
 								}
 								numxattrs++;

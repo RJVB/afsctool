@@ -479,7 +479,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 #endif
 	// use open() with an exclusive lock so noone can modify the file while we're at it
-	fdIn = open(inFile, O_RDWR|O_EXLOCK);
+	fdIn = open(inFile, O_RDWR|O_EXLOCK|O_NONBLOCK);
 	if (fdIn == -1)
 	{
 		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
@@ -2277,7 +2277,6 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 								if (xattrsize < 0)
 								{
 									fprintf(stderr, "getxattr: %s\n", strerror(errno));
-									free(xattrnames);
 									continue;
 								}
 								numxattrs++;

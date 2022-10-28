@@ -1,8 +1,9 @@
 afsctool-mp9-work
 xcode
-build
+build*
 *.log
 .*-swp
 testdir
 .kdev4
 *.kdev4
+afsctool-lnx-work

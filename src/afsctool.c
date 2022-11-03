@@ -616,7 +616,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			lz_WorkSpace = malloc(cmpedsize);
 			// for this compressor we will let the outBuf grow incrementally. Slower,
 			// but use only as much memory as required.
-			outBuf = calloc(numBlocks, sizeof(chunkTable));
+			outBuf = calloc(numBlocks, sizeof(*chunkTable));
 			chunkTable = outBuf;
 			if (!lz_WorkSpace || !chunkTable) {
 				fprintf(stderr,
@@ -627,7 +627,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			}
 			struct compressionType t = {CMP_LZVN_XATTR, CMP_LZVN_RESOURCE_FORK};
 			compressionType = t;
-			outBufSize = chunkTableByteSize = numBlocks * sizeof(chunkTable);
+			outBufSize = chunkTableByteSize = numBlocks * sizeof(*chunkTable);
 			chunkTable[0] = chunkTableByteSize;
 			break;
 		}
@@ -638,7 +638,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			lz_WorkSpace = lz_EstimatedCompressedSize ? malloc(lz_EstimatedCompressedSize) : 0;
 			// for this compressor we will let the outBuf grow incrementally. Slower,
 			// but use only as much memory as required.
-			outBuf = calloc(numBlocks, sizeof(chunkTable));
+			outBuf = calloc(numBlocks, sizeof(*chunkTable));
 			chunkTable = outBuf;
 			if ((!lz_WorkSpace && lz_EstimatedCompressedSize) || !chunkTable) {
 				fprintf(stderr,
@@ -649,7 +649,7 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			}
 			struct compressionType t = {CMP_LZFSE_XATTR, CMP_LZFSE_RESOURCE_FORK};
 			compressionType = t;
-			outBufSize = chunkTableByteSize = numBlocks * sizeof(chunkTable);
+			outBufSize = chunkTableByteSize = numBlocks * sizeof(*chunkTable);
 			chunkTable[0] = chunkTableByteSize;
 			break;
 #endif

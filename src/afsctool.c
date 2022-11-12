@@ -617,7 +617,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			// for this compressor we will let the outBuf grow incrementally. Slower,
 			// but use only as much memory as required.
 
-                        // The chunk table stores the offset of every block, and the offset of where a next block _would_ go
+			// The chunk table stores the offset of every block, and the offset of where a next block _would_ go,
+			// so we need numBlocks + 1 items
 			outBuf = calloc(numBlocks + 1, sizeof(*chunkTable));
 			chunkTable = outBuf;
 			if (!lz_WorkSpace || !chunkTable) {
@@ -641,8 +642,8 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 			// for this compressor we will let the outBuf grow incrementally. Slower,
 			// but use only as much memory as required.
 
-                        // The chunk table stores the offset of every block, and the offset of where a next block _would_ go,
-                        // so we need numBlocks + 1 items
+			// The chunk table stores the offset of every block, and the offset of where a next block _would_ go,
+			// so we need numBlocks + 1 items
 			outBuf = calloc(numBlocks + 1, sizeof(*chunkTable));
 			chunkTable = outBuf;
 			if ((!lz_WorkSpace && lz_EstimatedCompressedSize) || !chunkTable) {

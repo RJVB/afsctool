@@ -59,7 +59,7 @@ include_directories(${SPARSEHASH_INCLUDE_DIR}
 link_directories(${SPARSEHASH_LIBRARY})
 add_definitions(-DSUPPORT_PARALLEL)
 if(ZLIB_SINGLESHOT)
-    add_definitions(ZLIB_SINGLESHOT_OUTBUF)
+    add_definitions(-DZLIB_SINGLESHOT_OUTBUF)
 endif()
 if(APPLE)
     if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/src/private/lzfse/CMakeLists.txt")

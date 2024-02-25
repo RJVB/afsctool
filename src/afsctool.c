@@ -96,6 +96,7 @@ const char *sizeunit2_long[sizeunits] = {"kibibytes", "mebibytes", "gibibytes", 
 const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024,
 	(long long int) 1024 * 1024 * 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024 * 1024 * 1024};
 
+static long long num_skipped = 0;
 int printVerbose = 0;
 static size_t maxOutBufSize = 0;
 void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp, bool onAPFS);
@@ -482,7 +483,12 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	fdIn = open(inFile, O_RDWR|O_EXLOCK|O_NONBLOCK);
 	if (fdIn == -1)
 	{
-		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			fprintf(stderr, "File \"%s\" probably locked (%s)\n", inFile, strerror(errno));
+		} else {
+			fprintf(stderr, "Error opening file \"%s\": %s\n", inFile, strerror(errno));
+		}
+		num_skipped += 1;
 		goto bail;
 	}
 #ifndef NO_USE_MMAP
@@ -2190,7 +2196,11 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 {
 	long long foldersize, foldersize_rounded;
 
-	printf("Total number of files: %lld\n", folderinfo->num_files);
+	printf("Total number of files: %lld", folderinfo->num_files);
+	if (num_skipped) {
+		printf(", %lld skipped", num_skipped);
+	}
+	printf("\n");
 	if (hardLinkCheck)
 		printf("Total number of file hard links: %lld\n", folderinfo->num_hard_link_files);
 	printf("Total number of folders: %lld\n", folderinfo->num_folders);
@@ -3284,7 +3294,11 @@ next_arg:;
 							printf("Number of HFS+/APFS compressed files: %lld\n", folderinfo.filetypes[i].num_compressed);
 						if (printVerbose > 0 && nJobs == 0 && (!folderinfo.invert_filetypelist))
 						{
-							printf("Total number of files: %lld\n", folderinfo.filetypes[i].num_files);
+							printf("Total number of files: %lld", folderinfo.filetypes[i].num_files);
+							if (num_skipped) {
+								printf(", %lld skipped", num_skipped);
+							}
+							printf("\n");
 							if (hardLinkCheck)
 								printf("Total number of file hard links: %lld\n", folderinfo.filetypes[i].num_hard_link_files);
 							filesize = folderinfo.filetypes[i].uncompressed_size;
@@ -3332,7 +3346,11 @@ next_arg:;
 						printf("Number of HFS+/APFS compressed files: %lld\n", alltypesinfo.num_compressed);
 						if (printVerbose > 0 && nJobs == 0)
 						{
-							printf("Total number of files: %lld\n", alltypesinfo.num_files);
+							printf("Total number of files: %lld", alltypesinfo.num_files);
+							if (num_skipped) {
+								printf(", %lld skipped", num_skipped);
+							}
+							printf("\n");
 							if (hardLinkCheck)
 								printf("Total number of file hard links: %lld\n", alltypesinfo.num_hard_link_files);
 							filesize = alltypesinfo.uncompressed_size;

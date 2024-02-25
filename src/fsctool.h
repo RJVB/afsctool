@@ -39,10 +39,10 @@ struct folder_info
 	long long int num_folders;
 	long long int num_hard_link_folders;
 	long long int maxSize;
-    // set by compressFile():
+	// set by compressFile():
 	long long int data_compressed_size;
 	int print_info;
-    compression_type compressiontype;
+	compression_type compressiontype;
 	int compressionlevel;
 	double minSavings;
 	bool print_files;
@@ -50,7 +50,7 @@ struct folder_info
 	bool allowLargeBlocks;
 	bool check_files;
 	bool check_hard_links;
-    bool follow_sym_links;
+	bool follow_sym_links;
 	struct filetype_info *filetypes;
 	long long int numfiletypes;
 	long long int filetypessize;
@@ -59,11 +59,11 @@ struct folder_info
 	int filetypeslistsize;
 	bool invert_filetypelist;
 	bool backup_file;
-    bool onAPFS;
+	bool onAPFS;
 #ifndef __cplusplus
-    void *z_compression;
+	void *z_compression;
 #else
-    std::string *z_compression;
+	std::string *z_compression;
 public:
 	folder_info()
 	{
@@ -90,6 +90,7 @@ private:
         // no need to reset z_compression ATM since it holds
         // the address of a local variable that remains valid.
 	}
+public:
 #endif
 };
 

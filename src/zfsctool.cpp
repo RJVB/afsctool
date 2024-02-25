@@ -80,6 +80,7 @@ const long long int sizeunit2[sizeunits] = {1024, 1024 * 1024, 1024 * 1024 * 102
 											(long long int) 1024 * 1024 * 1024 * 1024 * 1024, (long long int) 1024 * 1024 * 1024 * 1024 * 1024 * 1024
 										   };
 
+static long long num_skipped = 0;
 static int printVerbose = 0;
 void printFileInfo(const char *filepath, struct stat *fileinfo);
 
@@ -988,12 +989,17 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	// use open() with an exclusive lock so no one can modify the file while we're at it
 	// open RO in testing mode
 #ifdef linux
-	int fdIn = testing ? open64(inFile, O_RDONLY | O_EXLOCK) : open64(inFile, O_RDWR | O_EXLOCK);
+	int fdIn = testing ? open64(inFile, O_RDONLY | O_EXLOCK | O_NONBLOCK) : open64(inFile, O_RDWR | O_EXLOCK | O_NONBLOCK);
 #else
-	int fdIn = testing ? open(inFile, O_RDONLY | O_EXLOCK) : open(inFile, O_RDWR | O_EXLOCK);
+	int fdIn = testing ? open(inFile, O_RDONLY | O_EXLOCK | O_NONBLOCK) : open(inFile, O_RDWR | O_EXLOCK | O_NONBLOCK);
 #endif
 	if (fdIn == -1) {
-		fprintf(stderr, "%s: %s\n", inFile, strerror(errno));
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			fprintf(stderr, "File \"%s\" probably locked (%s)\n", inFile, strerror(errno));
+		} else {
+			fprintf(stderr, "Error opening file \"%s\": %s\n", inFile, strerror(errno));
+		}
+		num_skipped += 1;
 		goto bail;
 	}
 	inBuf = malloc(filesize);
@@ -1443,7 +1449,11 @@ void printFolderInfo(struct folder_info *folderinfo, bool hardLinkCheck)
 {
 	long long foldersize, foldersize_rounded;
 
-	printf("Total number of files: %lld\n", folderinfo->num_files);
+	printf("Total number of files: %lld", folderinfo->num_files);
+	if (num_skipped) {
+		printf(", %lld skipped", num_skipped);
+	}
+	printf("\n");
 	if (hardLinkCheck)
 		printf("Total number of file hard links: %lld\n", folderinfo->num_hard_link_files);
 	printf("Total number of folders: %lld\n", folderinfo->num_folders);

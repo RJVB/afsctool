@@ -1536,7 +1536,7 @@ void process_folder(FTS *currfolder, struct folder_info *folderinfo)
 	fts_close(currfolder);
 }
 
-#define COMPRESSIONNAMES "on|off|gzip|gzip-1|gzip-2|gzip-3|gzip-4|gzip-5|gzip-6|gzip-7|gzip-8|gzip-9|lz4|lzjb|zle"
+#define COMPRESSIONNAMES "on|off|gzip|gzip-[1-9]|lz4|lzjb|zle|zstd|zstd-[1-19]"
 
 void printUsage()
 {
@@ -1626,7 +1626,24 @@ int zfsctool(int argc, const char *argv[])
 					codec = argv[i];
 					std::set<std::string> compNames;
 					split(COMPRESSIONNAMES, compNames, '|');
-					//std::cerr << compNames << std::endl;
+					// check for and expand "gzip-[1-9]"
+					if (compNames.count("gzip-[1-9]")) {
+						compNames.erase("gzip-[1-9]");
+						for (auto c = 1 ; c < 10 ; ++c) {
+							compNames.insert("gzip-" + std::to_string(c));
+						}
+					}
+					// check for and expand "zstd-[1-9]"
+					if (compNames.count("zstd-[1-19]")) {
+						compNames.erase("zstd-[1-19]");
+						for (auto c = 1 ; c < 20 ; ++c) {
+							compNames.insert("zstd-" + std::to_string(c));
+						}
+					}
+// 					for (auto c : compNames) {
+// 						std::cerr << c << " ";
+// 					}
+// 					std::cerr << std::endl;
 					if (strcasecmp(argv[i], "test") == 0) {
 						// map to all lowercase
 						codec = "test";

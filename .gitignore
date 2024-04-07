@@ -3,6 +3,7 @@ xcode
 build*
 *.log
 .*-swp
+.*.swp
 testdir
 .kdev4
 *.kdev4

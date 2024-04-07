@@ -147,6 +147,7 @@ if(APPLE)
     target_link_libraries(${ZFSCTOOL} "-framework CoreServices")
 else()
     target_link_libraries(${ZFSCTOOL} "-lrt -ldl -lbsd -pthread")
+    install(TARGETS ${ZFSCTOOL} DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 endif()
 
 FEATURE_SUMMARY(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)

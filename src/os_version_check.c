@@ -181,6 +181,9 @@ int32_t isMacOSVersionAtLeast(int32_t Major, int32_t Minor, int32_t Subminor)
 }
 
 #else
+
+#include <stdint.h>
+
 int32_t isMacOSVersionAtLeast(int32_t Major, int32_t Minor, int32_t Subminor)
 {
 	return 0;

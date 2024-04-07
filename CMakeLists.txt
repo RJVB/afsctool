@@ -40,6 +40,8 @@ endif()
 # Not currently possible on Linux because the fts functions are incompatible
 # add_definitions("-D_FILE_OFFSET_BITS=64")
 
+set(CXX_STDLIB "" CACHE STRING "C++ standard library to use; when not empty this gets passed to the compiler/linker via `-stdlib=<val>`") 
+
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/_cmake/modules ${CMAKE_MODULE_PATH} )
 
 include(FeatureSummary)
@@ -48,6 +50,12 @@ include(CheckIncludeFile)
 include(GetGitRevisionDescription)
 
 set(CMAKE_CXX_STANDARD 11)
+if (NOT "${CXX_STDLIB}" STREQUAL "")
+    string(FIND ${CMAKE_CXX_FLAGS} "-stdlib=${CXX_STDLIB}" result)
+    if ("${result}" MATCHES "-1")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=${CXX_STDLIB}")
+    endif()
+endif()
 
 find_package(ZLIBP 1.2.8 REQUIRED)
 find_package(SPARSEHASH)
@@ -115,6 +123,7 @@ set_source_files_properties(src/afsctool.c PROPERTIES COMPILE_DEFINITIONS AFSCTO
 add_executable(${AFSCTOOL}
     src/afsctool.c
     src/main.cpp
+    src/os_version_check.c
     $<TARGET_OBJECTS:PP>
 )
 if(HFSCOMPRESS_TO_ZFS)

@@ -37,7 +37,6 @@
 
 	#include <CoreFoundation/CoreFoundation.h>
 	#include <CoreServices/CoreServices.h>
-	#define BlockMutable	__block
 #else
 	// for cross-platform debugging only!
 	#include <bsd/stdlib.h>
@@ -54,7 +53,11 @@
 	#define OSSwapHostToLittleInt64(x)	htole64(x)
 	#define OSSwapLittleToHostInt32(x)	le32toh(x)
 	#define MAP_NOCACHE 				0
-	#define BlockMutable				/**/
+#endif
+#ifdef __BLOCKS__
+#	define BlockMutable	__block
+#else
+#	define BlockMutable	/**/
 #endif
 
 #include "afsctool.h"
@@ -103,9 +106,10 @@ void printFileInfo(const char *filepath, struct stat *fileinfo, bool appliedcomp
 
 #if !__has_builtin(__builtin_available)
 #	warning "Please use clang 5 or newer if you can"
-// determine the Darwin major version number
-static int darwinMajor = 0;
+// // determine the Darwin major version number
+// static int darwinMajor = 0;
 #endif
+extern int32_t isMacOSVersionAtLeast(int32_t, int32_t, int32_t);
 
 char* getSizeStr(long long int size, long long int size_rounded, int likeFinder)
 {
@@ -377,7 +381,14 @@ void compressFile(const char *inFile, struct stat *inFileInfo, struct folder_inf
 	}
 
 #ifdef __APPLE__
-	void (^restoreFile)() = ^{
+#ifdef __BLOCKS__
+	void (^restoreFile)() = ^
+#else
+	// GCC implementation using a "nested function"
+	// (https://gcc.gnu.org/onlinedocs/gcc-4.1.2/gcc/Nested-Functions.html#Nested-Functions)
+	void restoreFile()
+#endif
+	{
 		if (write(fdIn, inBuf, filesize) != filesize) {
 			fprintf(stderr, "%s: Error restoring file (%lld bytes; %s)\n", inFile, filesize, strerror(errno));
 			if (backupName) {
@@ -1544,12 +1555,8 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			removeResourceFork = true;
 		case CMP_LZVN_XATTR:
 	        if (
-#if __has_builtin(__builtin_available)
 				// we can do simplified runtime OS version detection: accept LZVN on 10.9 and up.
-				__builtin_available(macOS 10.9, *)
-#else
-				darwinMajor >= 13
-#endif
+				isMacOSVersionAtLeast(10, 9, 0)
 			) {
 				doSimpleDecompression = true;
 			}
@@ -1565,12 +1572,8 @@ void decompressFile(const char *inFile, struct stat *inFileInfo, bool backupFile
 			removeResourceFork = true;
 		case CMP_LZFSE_XATTR:
 	        if (
-#if __has_builtin(__builtin_available)
 				// we can do simplified runtime OS version detection: accept LZFSE on 10.11 and up.
-				__builtin_available(macOS 10.11, *)
-#else
-				darwinMajor >= 15
-#endif
+				isMacOSVersionAtLeast(10, 11, 0)
 			) {
 				doSimpleDecompression = true;
 			}
@@ -2495,17 +2498,17 @@ int afsctool (int argc, const char * argv[])
 		exit(EINVAL);
 	}
 
-#if !__has_builtin(__builtin_available)
-#	warning "Please use clang 5 or newer if you can"
-	// determine the Darwin major version number
-	{
-		FILE *uname = popen("uname -r", "r");
-		if (uname)
-		{
-			fscanf(uname, "%d", &darwinMajor);
-		}
-	}
-#endif
+// #if !__has_builtin(__builtin_available)
+// #	warning "Please use clang 5 or newer if you can"
+// 	// determine the Darwin major version number
+// 	{
+// 		FILE *uname = popen("uname -r", "r");
+// 		if (uname)
+// 		{
+// 			fscanf(uname, "%d", &darwinMajor);
+// 		}
+// 	}
+// #endif
 
 	for (i = 1; i < argc && argv[i][0] == '-'; i++)
 	{
@@ -2661,13 +2664,9 @@ int afsctool (int argc, const char * argv[])
 					} else if (strcasecmp(argv[i], "lzvn") == 0) {
 #ifdef HAS_LZVN
 						if(
-#if __has_builtin(__builtin_available)
 							// we can do simplified runtime OS version detection: accept LZVN on 10.9 and up.
 							// NB: apparently this cannot be merged into a single if() with the strcasecmp().
-							__builtin_available(macOS 10.9, *)
-#else
-							darwinMajor >= 13
-#endif
+							isMacOSVersionAtLeast(10, 9, 0)
 						) {
 							compressiontype = LZVN;
 						} else {
@@ -2681,11 +2680,7 @@ int afsctool (int argc, const char * argv[])
 					} else if (strcasecmp(argv[i], "lzfse") == 0) {
 #ifdef HAS_LZFSE
 						if(
-#if __has_builtin(__builtin_available)
-							__builtin_available(macOS 10.11, *)
-#else
-							darwinMajor >= 15
-#endif
+							isMacOSVersionAtLeast(10, 11, 0)
 						) {
 							// accept LZFSE on 10.11 and up.
 							compressiontype = LZFSE;
